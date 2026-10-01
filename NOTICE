@@ -1,0 +1,11 @@
+coxlm
+Copyright 2026 Jonathan and the cox contributors
+
+Licensed under the Apache License, Version 2.0. If you use this code or its
+results, keep this notice and credit the project.
+
+coxlm is the inference package extracted from the cox research code. This
+repository contains code only; it does not distribute model weights.
+Backbones (e.g. Qwen3.5) are downloaded by the user from the Hugging Face Hub
+and carry their own licences, as do any trained checkpoints and the datasets
+they were trained on. Check each before redistributing trained weights.

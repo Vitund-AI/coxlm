@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coxlm"
+dynamic = ["version"]  # single source: coxlm.__version__ in src/coxlm/__init__.py
+description = "Typed questions in, calibrated probabilities out: one forward pass of a fine-tuned encoder."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Jonathan and the cox contributors" }]
+keywords = ["classification", "calibration", "structured output", "llm", "typed decisions", "inference"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+    "Typing :: Typed",
+]
+# the base install is the client (coxlm.connect) and the schema API: standard library only
+dependencies = []
+
+[project.optional-dependencies]
+# run a checkpoint in-process: coxlm.load(...)
+local = [
+    "torch>=2.1",
+    "transformers>=5.17",  # tested minimum: from_pretrained(dtype=), Qwen3.5 backbones
+    "peft",                # LoRA adapter checkpoints
+]
+# coxlm-serve (the server itself is standard library; it needs the model)
+serve = ["coxlm[local]"]
+# optional: Hugging Face hub kernels (fused causal-conv1d for Qwen3.5 backbones)
+fast = ["kernels"]
+test = ["pytest"]
+
+# TODO before publishing: replace with the real repository once it exists (see RELEASING.md)
+[project.urls]
+Homepage = "https://github.com/TODO/coxlm"
+Source = "https://github.com/TODO/coxlm"
+Issues = "https://github.com/TODO/coxlm/issues"
+
+[project.scripts]
+coxlm-serve = "coxlm.serve:main"
+
+[tool.hatch.version]
+path = "src/coxlm/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/coxlm"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["src/coxlm", "LICENSE", "NOTICE", "README.md", "pyproject.toml"]
+exclude = ["__pycache__", "*.pyc", ".gitignore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,81 @@
+[
+  {
+    "name": "Support triage (choice · yes/no)",
+    "questions": [
+      {"type": "choice", "question": "How urgent is this ticket?", "options": "low: no rush\nmedium: this week\nhigh: today\nurgent: right now"},
+      {"type": "yesno", "question": "Is the customer frustrated?"},
+      {"type": "choice", "question": "Which team should handle it?", "options": "billing\ntechnical\naccount\ngeneral"}
+    ],
+    "states": [
+      {"id": "T-1", "state": "The whole site is down and customers cannot check out. This is costing us sales every minute."},
+      {"id": "T-2", "state": "Minor typo on your pricing page, no rush, just thought you should know."},
+      {"id": "T-3", "state": "I was charged twice this month and need the duplicate refunded today please."}
+    ]
+  },
+  {
+    "name": "Ordering: dinner schedule (order)",
+    "questions": [
+      {"type": "order", "mode": "pairwise", "question": "Which of these tasks must be finished before which others can start?", "options": "preheat the oven (5 mins)\nchop the vegetables (15 mins)\nset the table (5 mins)\nroast the chicken (90 minutes)\nmake the salad (15 minutes)\nserve the cooked dinner (5 minutes)"}
+    ],
+    "states": [
+      {"id": "dinner", "state": "Cooking a roast-chicken dinner for guests tonight in the most efficient time possible."}
+    ]
+  },
+  {
+    "name": "Résumé screening (features · yes/no)",
+    "questions": [
+      {"type": "features", "question": "Is this supported by the résumé?", "options": "Python\npeople-management experience\ngraduate degree\nwilling to relocate\nstartup experience"},
+      {"type": "yesno", "question": "Is this a senior candidate?"}
+    ],
+    "states": [
+      {"id": "A", "state": "Sofia K. — 8 years building data pipelines in Python and Go. Led a team of five at a Series B startup. MSc in Computer Science. Based in Berlin, open to relocation."},
+      {"id": "B", "state": "Junior developer, 1 year with JavaScript and React. Bachelor degree in progress. Looking for a first full-time role, remote only."}
+    ]
+  },
+  {
+    "name": "Review analysis (score · yes/no · choice)",
+    "questions": [
+      {"type": "score", "question": "How positive is this review overall?", "options": "-2: very negative\n-1: negative\n0: neutral\n1: positive\n2: very positive"},
+      {"type": "yesno", "question": "Does the reviewer mention price or value?"},
+      {"type": "choice", "question": "What is the review mainly about?", "options": "build quality\nshipping\ncustomer service\nfeatures\nother"}
+    ],
+    "states": [
+      {"id": "r1", "state": "Arrived two days late and the box was crushed, but honestly the blender itself is fantastic and worth every penny."},
+      {"id": "r2", "state": "Support ignored my emails for a week. The product is fine I guess. Would not buy again."},
+      {"id": "r3", "state": "Absolutely love it — powerful, quiet, and cheaper than the competitors I looked at."}
+    ]
+  },
+  {
+    "name": "Aspect ratings (multi-score)",
+    "questions": [
+      {"type": "multiscore", "question": "Rate this restaurant review on each aspect.", "options": "food quality\nservice\nvalue for money\nambiance", "scale": "1: terrible\n2: poor\n3: okay\n4: good\n5: excellent"}
+    ],
+    "states": [
+      {"id": "rev1", "state": "The pasta was incredible and the staff were attentive, though it's a bit pricey and the dining room was quite loud."},
+      {"id": "rev2", "state": "Slow service and mediocre food, but a gorgeous room and very reasonable prices."}
+    ]
+  },
+  {
+    "name": "Ticket priority (multi-score)",
+    "questions": [
+      {"type": "multiscore", "question": "Rate this support ticket on each factor.", "options": "urgency\nbusiness impact\nchurn risk\neffort to resolve", "scale": "1: very low\n2: low\n3: medium\n4: high\n5: very high"}
+    ],
+    "states": [
+      {"id": "T-1", "state": "Enterprise customer: the production API is returning 500s for all their users, and their contract renewal is next week."},
+      {"id": "T-2", "state": "Free-tier user politely asks whether a dark mode is on the roadmap. No urgency."},
+      {"id": "T-3", "state": "Paying customer hit a confusing error at checkout; a workaround exists but they are frustrated."}
+    ]
+  },
+  {
+    "name": "Bug severity (score · yes/no)",
+    "questions": [
+      {"type": "score", "question": "How severe is this bug?", "options": "0: cosmetic\n1: minor\n3: major\n6: critical\n10: release blocker"},
+      {"type": "yesno", "question": "Is there a data-loss or billing risk?"}
+    ],
+    "states": [
+      {"id": "B-1", "state": "The footer shows last year in the copyright line."},
+      {"id": "B-2", "state": "Some customers are charged twice and a few of those transactions are never recorded."},
+      {"id": "B-3", "state": "The app crashes on launch for every Android 13 device since the latest update."}
+    ]
+  }
+]
