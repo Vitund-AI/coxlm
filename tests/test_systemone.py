@@ -1,6 +1,6 @@
 """System One <-> cox translation round-trips without a model."""
 
-from cox.systemone import answer_systemone, from_matrix_result, to_matrix_request
+from coxlm.systemone import answer_systemone, from_matrix_result, to_matrix_request
 
 REQ = {
     "state": "The tenant has not paid rent for three months.",
