@@ -93,6 +93,22 @@ def _usage(matrix_result: dict) -> dict:
     return {"input_tokens": res.get("state_tokens"), "output_tokens": len(res.get("cells", []))}
 
 
+def _score_probs_by_index(cell: dict, legend: dict[str, str]) -> dict[str, float] | None:
+    """The contract keys score probabilities by level index ("0", "1", ...), as the legend is keyed; cox's
+    cell keys them by level label. Re-key by label, else by position (the cell keeps the levels' order)."""
+    probs = cell.get("probabilities")
+    if not isinstance(probs, dict):
+        return probs
+    if set(probs) == set(legend):
+        return probs
+    by_label = {lab: i for i, lab in legend.items()}
+    if set(probs) <= set(by_label) and len(by_label) == len(legend):
+        return {by_label[lab]: p for lab, p in probs.items()}
+    if len(probs) == len(legend):
+        return {str(i): p for i, p in enumerate(probs.values())}
+    return probs
+
+
 def from_matrix_result(matrix_result: dict, ids: list[str], req: dict,
                        model_name: str = "cox") -> dict:
     """infer_matrix result (single state) -> System One response."""
@@ -116,7 +132,7 @@ def from_matrix_result(matrix_result: dict, ids: list[str], req: dict,
             legend = {str(i): _as_text(d) for i, d in enumerate(criteria)}
             answers[qid] = {"type": "score", "score": cell.get("score"),
                             "confidence": cell.get("confidence"),
-                            "legend": legend, "probabilities": cell.get("probabilities")}
+                            "legend": legend, "probabilities": _score_probs_by_index(cell, legend)}
         else:  # an extension type reached here; pass it through rather than lose it
             answers[qid] = {"type": kind, **{k: v for k, v in cell.items() if k != "kind"}}
     return {"model": model_name, "answers": answers, "usage": _usage(matrix_result),
