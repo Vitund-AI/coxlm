@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "Jonathan and the cox contributors" }]
+authors = [{ name = "Jonathan Baker" }]
 keywords = ["classification", "calibration", "structured output", "llm", "typed decisions", "inference"]
 classifiers = [
     "Development Status :: 3 - Alpha",
