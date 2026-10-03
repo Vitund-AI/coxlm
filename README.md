@@ -19,9 +19,9 @@ This is a research build. **Model weights are not distributed yet.** Use
 From git:
 
 ```bash
-pip install "git+<repository url>"                 # the client: no torch, no GPU needed
-pip install "coxlm[local] @ git+<repository url>"  # also run checkpoints locally (torch, transformers, peft)
-pip install "coxlm[serve] @ git+<repository url>"  # also run the coxlm-serve server
+pip install "git+https://github.com/Vitund-AI/coxlm.git"                 # the client: no torch, no GPU needed
+pip install "coxlm[local] @ git+https://github.com/Vitund-AI/coxlm.git"  # also run checkpoints locally (torch, transformers, peft)
+pip install "coxlm[serve] @ git+https://github.com/Vitund-AI/coxlm.git"  # also run the coxlm-serve server
 ```
 
 Python 3.10 or newer. The base install uses only the standard library. Importing
@@ -73,7 +73,7 @@ schemas of many questions. All of them are answered in one pass.
 ## Running a server
 
 ```bash
-pip install "coxlm[serve] @ git+<repository url>"
+pip install "coxlm[serve] @ git+https://github.com/Vitund-AI/coxlm.git"
 coxlm-serve --model path/to/model.pt --encoder Qwen/Qwen3.5-4B-Base --port 8000
 ```
 

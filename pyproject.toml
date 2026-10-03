@@ -44,11 +44,10 @@ serve = ["coxlm[local]"]
 fast = ["kernels"]
 test = ["pytest"]
 
-# TODO before publishing: replace with the real repository once it exists (see RELEASING.md)
 [project.urls]
-Homepage = "https://github.com/TODO/coxlm"
-Source = "https://github.com/TODO/coxlm"
-Issues = "https://github.com/TODO/coxlm/issues"
+Homepage = "https://github.com/Vitund-AI/coxlm"
+Source = "https://github.com/Vitund-AI/coxlm"
+Issues = "https://github.com/Vitund-AI/coxlm/issues"
 
 [project.scripts]
 coxlm-serve = "coxlm.serve:main"
