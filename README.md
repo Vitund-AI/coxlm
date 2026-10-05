@@ -87,6 +87,48 @@ answered in the same pass and independently of the others.
 `multiscore(aspects, levels)` (one score per aspect on a shared scale) build
 schemas of many questions. All of them are answered in one pass.
 
+## Putting items in order
+
+`order_items` puts a set of items (events, steps, tasks) in order. It builds on the question types above and needs
+no special model support.
+
+```python
+from coxlm import order_items
+
+events = [
+    "checkout latency alarms fire",
+    "the configuration change is deployed",
+    "the change is rolled back",
+    "checkout recovers",
+]
+result = order_items(model, events, mode="pairwise", context=incident_review_text,
+                     instructions="In what order did these events happen?")
+print(result["ordered_items"])
+```
+
+Items are listed in a random order in the prompt, so the order you pass them in carries no information.
+
+| mode | questions asked | what you get |
+|---|---|---|
+| `"score"` (default) | one per item: which position does it occupy? (n questions) | `order`, `ordered_items`, `positions` (each item's expected position and distribution over positions) |
+| `"pairwise"` | one per pair: does i come before j? (n(n-1)/2 questions) | everything below |
+
+Pairwise mode costs more questions but reads more out of the answers. It thresholds the pairwise probabilities into
+the precedences the model is confident about (`epsilon`, default 0.15) and returns:
+
+- `order` / `ordered_items`: the most likely order consistent with those precedences;
+- `graph`: the confident precedences, as `[before, after, probability]` edges (transitively reduced);
+- `levels`: groups of items that can happen at the same time;
+- `ranges`: each item's feasible positions, `[earliest, latest]`;
+- `flexible_pairs`: pairs the model leaves free, and `unresolved_pairs`: pairs it is unsure about *and* contradicts
+  itself on;
+- `consistency`: the share of item triples whose pairwise answers do not form a cycle (1.0 is fully consistent);
+- `linear_extensions` and `top_orders`: how many orders fit the precedences, and the most probable complete orders
+  with their probabilities (up to 9 items).
+
+When a set of steps has no single correct order, the graph and `levels` are the useful output, not `order`. Worked
+examples with real output: [vitund.ai/open-source/coxlm/examples](https://vitund.ai/open-source/coxlm/examples).
+
 ## Running a server
 
 ```bash
