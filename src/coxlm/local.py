@@ -7,12 +7,9 @@ from __future__ import annotations
 
 import os
 
-# build settings recorded in a checkpoint's metadata that build_model takes; the
-# rest (prompt format, readout mode, pauses, ...) are applied by load_state
-_BUILD_KEYS = ("dtype", "state_norm", "question_mode", "packed_state_attention", "readout_layers", "pool",
-               "read_layer", "truncate", "option_block", "prompt_format")
-# what the published checkpoints use, for a checkpoint without metadata
-_DEFAULTS = {"dtype": "bf16", "state_norm": "standardize", "question_mode": "packed"}
+# build settings recorded in a checkpoint's metadata that build_model takes; the readout settings are applied by
+# load_state, which also refuses settings coxlm does not implement
+_BUILD_KEYS = ("state_norm", "pool")
 
 
 def load(path: str | os.PathLike, encoder: str | None = None, device: str | None = None, dtype: str | None = None,
@@ -26,7 +23,7 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
     """
     import torch
 
-    from .checkpoint import checkpoint_lora_r, checkpoint_meta, load_state, read_checkpoint
+    from .checkpoint import check_supported, checkpoint_lora_r, checkpoint_meta, load_state, read_checkpoint
     from .model import build_model
 
     state = read_checkpoint(path)
@@ -38,9 +35,9 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
         import warnings
         warnings.warn(f"checkpoint was trained on {meta['encoder']!r} but is being loaded on {encoder!r}", stacklevel=2)
     build = meta.get("build") or {}
-    kwargs = {k: build[k] for k in _BUILD_KEYS if k in build}
-    for k, v in _DEFAULTS.items():
-        kwargs.setdefault(k, v)
+    check_supported(build)  # before downloading a backbone for a checkpoint that cannot be read
+    kwargs = {k: build[k] for k in _BUILD_KEYS if build.get(k) is not None}
+    kwargs.setdefault("state_norm", "standardize")
     # bf16 unless asked otherwise, whatever the checkpoint recorded: models are trained (and every published number
     # measured) with a bf16 backbone, and full-weight checkpoints saved in fp32 would otherwise load at twice the memory
     kwargs["dtype"] = dtype or "bf16"

@@ -2,7 +2,7 @@
 
 A checkpoint is a ``torch.save``d state dict. Besides the weights it may carry a
 metadata entry under ``META_KEY``: the backbone it was trained on, the build
-settings (prompt format, readout mode, ...) and the schema features it was
+settings (readout mode, option isolation, ...) and the schema features it was
 trained to understand. ``load_state`` applies those settings before loading the
 weights, so a checkpoint is always read the way it was trained.
 
@@ -106,49 +106,62 @@ def _quantize_nvfp4(model, activations: bool) -> None:
     print(f"NVFP4 {'W4A4' if activations else 'W4A16'} (simulated, blocks of 16, e4m3 block scales): {n} backbone linear layers", flush=True)
 
 
+# Build settings a checkpoint may record, and the values coxlm implements. Anything else was a research setting
+# that never shipped; such a checkpoint is refused by name rather than read wrongly. (key: (default if absent, allowed))
+_SUPPORTED = {
+    "question_mode": ("packed", {"packed"}),
+    "prompt_format": ("plain", {"xml"}),
+    "packed_state_attention": ("native", {"native"}),
+    "read_layer": (None, {None}),
+    "truncate": (False, {False}),
+    "option_block": (0, {0}),
+    "task_meta_pos": ("off", {"off"}),
+    "state_tag": ("state", {"state"}),
+    "question_prefix": ("", {""}),
+    "state_preamble": ("", {""}),
+    "span_pool": ("last", {"last"}),
+    "answer_sentinel": ("none", {"none"}),
+    "lora_scope": ("all", {"all"}),
+    "readout_mode": ("slot", {"slot", "pointer"}),
+    "option_contrast": (0, {0}),
+    "recycle": (0, {0}),
+    "pause_tokens": (0, {0}),
+    "state_norm": ("standardize", {"standardize", "off", False, None}),
+}
+# head weights of components the packed layout never uses (older checkpoints save them)
+_UNUSED_HEAD = ("readout.", "readout_norm.", "readout_stack.", "span_attn.")
+
+
+def check_supported(build: dict) -> None:
+    """Raise ValueError naming every recorded build setting coxlm does not implement."""
+    bad = [f"{k}={build.get(k, d)!r}" for k, (d, ok) in _SUPPORTED.items() if build.get(k, d) not in ok]
+    if build.get("readout_mode") == "pointer" and build.get("pointer_yesno") is False and build.get("yesno_layout", "pointer") != "slot":
+        bad.append(f"yesno_layout={build.get('yesno_layout', 'pointer')!r}")
+    if bad:
+        raise ValueError("this checkpoint uses build settings coxlm does not support: " + ", ".join(bad))
+
+
 def load_state(model: AmortizedDecisionModel, path: str | dict) -> AmortizedDecisionModel:
     """Load a checkpoint (a path, or a state dict already read with ``read_checkpoint``) into ``model``,
     applying the build settings recorded in its metadata. ``COX_QUANT`` = fp8 / fp4w / fp4 simulates
     quantized inference after the weights are in (accuracy only; no speed-up)."""
     state = read_checkpoint(path) if isinstance(path, (str, os.PathLike)) else dict(path)
-    meta = state.pop(META_KEY, None)
+    meta = state.pop(META_KEY, None) or {}
+    build = meta.get("build") or {}
+    check_supported(build)
     # a checkpoint with no metadata predates every optional schema feature
-    model.trained_features = set((meta or {}).get("features", []))
-    model.checkpoint_meta = meta or {}
-    # A checkpoint must be read in the prompt format it was trained in. Older
-    # checkpoints (no metadata, or metadata predating the format option) were all
-    # plain, so that is the default; this overrides the constructor default so a
-    # loaded checkpoint is always read correctly whatever the build/flag said.
-    model.prompt_format = ((meta or {}).get("build") or {}).get("prompt_format", "plain")
-    model.task_meta_pos = ((meta or {}).get("build") or {}).get("task_meta_pos", "off")
-    model.state_tag = ((meta or {}).get("build") or {}).get("state_tag", "state")
-    model.question_prefix = ((meta or {}).get("build") or {}).get("question_prefix", "")
-    model.state_preamble = ((meta or {}).get("build") or {}).get("state_preamble", "")
-    model.span_pool = ((meta or {}).get("build") or {}).get("span_pool", "last")
-    model.answer_sentinel = ((meta or {}).get("build") or {}).get("answer_sentinel", "none")
-    build = (meta or {}).get("build") or {}
-    if build.get("lora_scope", "all") != getattr(model, "lora_scope", "all"):  # adapters on question tokens only
-        model.lora_scope = build["lora_scope"]
-        model.install_lora_scope()
-    if build.get("letter_codes", "letters") != "letters":
-        model.letter_codes = build["letter_codes"]
-    if build.get("readout_mode", "slot") != "slot":  # create the pointer / letter head before its weights are loaded
+    model.trained_features = set(meta.get("features", []))
+    model.checkpoint_meta = meta
+    if build.get("readout_mode", "slot") != "slot":  # create the pointer head before its weights are loaded
         model.set_readout(build["readout_mode"])
     model.option_isolation = bool(build.get("option_isolation", False))
-    model.option_contrast = int(build.get("option_contrast", 0))
     model.pointer_yesno = bool(build.get("pointer_yesno", True))
-    model.yesno_layout = build.get("yesno_layout", "pointer")
-    if build.get("recycle", 0) != 0:  # recreate the recycle projection before its weights are loaded
-        model.set_recycle(int(build["recycle"]))
-    if build.get("pause_tokens"):  # recreate the pause vectors before their weights are loaded
-        model.set_pause(int(build["pause_tokens"]), build.get("pause_mode", "learned"))
     model.clear_cache()
+    state = {k: v for k, v in state.items() if not k.startswith(_UNUSED_HEAD)}
     missing, unexpected = model.load_state_dict(state, strict=False)
     if unexpected:
         raise RuntimeError(f"checkpoint has keys the model lacks (wrong backbone / lora settings?): {unexpected[:5]}")
     head_missing = [k for k in missing if not k.startswith("encoder.")]
-    if model.span_pool != "attn":  # span_attn is unused unless span_pool=="attn"; ok if a pre-span_attn checkpoint lacks it
-        head_missing = [k for k in head_missing if not k.startswith("span_attn.")]
     if head_missing:
         raise RuntimeError(f"checkpoint is missing readout weights: {head_missing[:5]}")
     q = os.environ.get("COX_QUANT")

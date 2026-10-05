@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The backbone runs in bf16 by default, whatever precision the checkpoint was saved in (`--dtype` / `load(dtype=)` override).
+- The model module holds only what released checkpoints use: the packed question layout with the slot or pointer readout (with option isolation). Research-only settings are gone, and a checkpoint that records one is refused with the setting named, instead of being read wrongly. Answers from supported checkpoints are unchanged (verified identical).
+- Pointer-readout checkpoints on hybrid backbones (Qwen3.5) raise a clear error: they need cache forks, not yet in coxlm.
+
 ## 0.1.0 (2026-09-30)
 
 First release: the inference package extracted from the cox research code.

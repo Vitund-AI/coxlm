@@ -201,9 +201,6 @@ class Schema:
     """A fixed set of fields the model answers together in one pass."""
 
     fields: tuple[Field, ...]
-    # optional task-intent block (e.g. "<task>This task is to ...</task>"), rendered
-    # at the position given by model.task_meta_pos. None = absent.
-    task_meta: str | None = None
 
     def __post_init__(self) -> None:
         names = [f.name for f in self.fields]
