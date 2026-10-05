@@ -1,12 +1,15 @@
 """coxlm: typed questions in, calibrated probabilities out, in one forward pass.
 
     import coxlm
-    from coxlm import questions, choice, score, yesno
+    from coxlm import questions, choice
 
-    model = coxlm.connect("http://host:8000")            # a coxlm server (no torch needed)
-    # model = coxlm.load("model.pt", encoder="...")      # local GPU (pip install "coxlm[local]")
+    # a coxlm server (no torch needed); or coxlm.load("model.pt") on a local GPU
+    model = coxlm.connect("http://localhost:8000")
+
     schema = questions(team=choice(["billing", "support"], instructions="Which team handles this?"))
-    answers = model.decide(["My card was charged twice!!"], schema)  # one result per text
+
+    # one result per text
+    answers = model.decide(["My card was charged twice!!"], schema)
     ans = answers[0]
     ans["team"].choice, ans["team"].confidence, ans["team"].probabilities
 

@@ -32,16 +32,32 @@ Python 3.10 or newer. The base install uses only the standard library. Importing
 ```python
 import coxlm
 from coxlm import questions, choice, score, yesno
-model = coxlm.connect("http://localhost:8000")  # remote: talks to /v1/decide on a coxlm server
-# or: model = coxlm.load("path/to/model.pt", encoder="Qwen/Qwen3.5-4B-Base")   # local GPU
+
+# Connect to a running coxlm server (no GPU or PyTorch needed on this machine)
+model = coxlm.connect("http://localhost:8000")
+
+# Or run a checkpoint on your own GPU (pip install "coxlm[local]"):
+# model = coxlm.load("path/to/model.pt")
+
+# Three questions, one of each type
 schema = questions(
     team=choice(["billing", "support", "sales"], instructions="Which team handles this?"),
     urgency=score(["low", "medium", "high"], instructions="How urgent is it?"),
-    refund=yesno("Is the customer asking for a refund?"))
-answers = model.decide(["My card was charged twice!!"], schema)  # one result per text
+    refund=yesno("Is the customer asking for a refund?"),
+)
+
+# decide() takes a list of texts and returns one result per text
+answers = model.decide(["My card was charged twice!!"], schema)
 ans = answers[0]
-if ans["refund"].p_yes > 0.8: ...
-elif ans["team"].confidence < 0.6: print(ans["team"].probabilities)
+
+# Each answer carries its probabilities, so the code can act on how sure the model is
+if ans["refund"].p_yes > 0.8:
+    print("Refund request")
+elif ans["team"].confidence < 0.6:
+    print("Unsure which team:", ans["team"].probabilities)
+else:
+    print("Route to", ans["team"].choice)
+print("Urgency (1 = low, 3 = high):", round(ans["urgency"].score, 1))
 ```
 
 `connect()` and `load()` return models with the same contract:
