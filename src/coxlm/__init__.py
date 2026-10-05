@@ -6,7 +6,8 @@
     model = coxlm.connect("http://host:8000")            # a coxlm server (no torch needed)
     # model = coxlm.load("model.pt", encoder="...")      # local GPU (pip install "coxlm[local]")
     schema = questions(team=choice(["billing", "support"], instructions="Which team handles this?"))
-    [ans] = model.decide(["My card was charged twice!!"], schema)
+    answers = model.decide(["My card was charged twice!!"], schema)  # one result per text
+    ans = answers[0]
     ans["team"].choice, ans["team"].confidence, ans["team"].probabilities
 
 Importing coxlm does not import torch; only ``load`` does.

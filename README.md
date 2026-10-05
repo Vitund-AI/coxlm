@@ -38,7 +38,8 @@ schema = questions(
     team=choice(["billing", "support", "sales"], instructions="Which team handles this?"),
     urgency=score(["low", "medium", "high"], instructions="How urgent is it?"),
     refund=yesno("Is the customer asking for a refund?"))
-[ans] = model.decide(["My card was charged twice!!"], schema)
+answers = model.decide(["My card was charged twice!!"], schema)  # one result per text
+ans = answers[0]
 if ans["refund"].p_yes > 0.8: ...
 elif ans["team"].confidence < 0.6: print(ans["team"].probabilities)
 ```
