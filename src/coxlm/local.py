@@ -21,8 +21,8 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
 
     ``encoder`` is the Hugging Face backbone the checkpoint was trained on (e.g. "Qwen/Qwen3.5-4B-Base");
     it defaults to the one recorded in the checkpoint. Adapter (LoRA) and full-weight checkpoints are told
-    apart from the checkpoint itself. ``dtype`` overrides the backbone dtype (default: as trained, usually
-    bf16); ``device`` defaults to CUDA when available. ``max_length`` is the state token budget.
+    apart from the checkpoint itself. ``dtype`` is the backbone dtype (default bf16, the dtype models are
+    trained and evaluated in; fp32 checkpoints are cast down); ``device`` defaults to CUDA when available. ``max_length`` is the state token budget.
     """
     import torch
 
@@ -41,8 +41,9 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
     kwargs = {k: build[k] for k in _BUILD_KEYS if k in build}
     for k, v in _DEFAULTS.items():
         kwargs.setdefault(k, v)
-    if dtype is not None:
-        kwargs["dtype"] = dtype
+    # bf16 unless asked otherwise, whatever the checkpoint recorded: models are trained (and every published number
+    # measured) with a bf16 backbone, and full-weight checkpoints saved in fp32 would otherwise load at twice the memory
+    kwargs["dtype"] = dtype or "bf16"
     lora_r = checkpoint_lora_r(state)
     dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
     if str(dev).startswith("cpu"):  # the hub causal-conv1d kernel is CUDA-only

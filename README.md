@@ -80,8 +80,10 @@ coxlm-serve --model path/to/model.pt --encoder Qwen/Qwen3.5-4B-Base --port 8000
 The checkpoint records the backbone it was trained on, so you can leave out
 `--encoder`. Adapter (LoRA) checkpoints and full-weight checkpoints are told
 apart automatically. `python -m coxlm.serve ...` does the same as `coxlm-serve`.
-The first run downloads the backbone from the Hugging Face Hub. A 4B backbone
-needs about 10 GB of GPU memory in bf16.
+The first run downloads the backbone from the Hugging Face Hub. The backbone
+runs in bf16, the precision models are trained and evaluated in, whatever
+precision the checkpoint was saved in (`--dtype` overrides it). A 4B backbone
+needs about 10 GB of GPU memory.
 
 | endpoint | what it does |
 |---|---|

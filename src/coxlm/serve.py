@@ -644,7 +644,7 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="coxlm-serve", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", required=True, help="checkpoint path (model.pt)")
     ap.add_argument("--encoder", default=None, help="backbone, e.g. Qwen/Qwen3.5-4B-Base (default: recorded in the checkpoint)")
-    ap.add_argument("--dtype", default=None, help="backbone dtype: bf16 / fp16 / fp32 (default: as trained)")
+    ap.add_argument("--dtype", default=None, help="backbone dtype: bf16 / fp16 / fp32 (default: bf16, as models are trained and evaluated)")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--max-length", type=int, default=2048, help="state token budget")
