@@ -32,7 +32,7 @@ Python 3.10 or newer. The base install uses only the standard library. Importing
 ```python
 import coxlm
 from coxlm import questions, choice, score, yesno
-model = coxlm.connect("http://boron:8000")      # remote: talks to /v1/decide on a coxlm server
+model = coxlm.connect("http://localhost:8000")  # remote: talks to /v1/decide on a coxlm server
 # or: model = coxlm.load("path/to/model.pt", encoder="Qwen/Qwen3.5-4B-Base")   # local GPU
 schema = questions(
     team=choice(["billing", "support", "sales"], instructions="Which team handles this?"),
