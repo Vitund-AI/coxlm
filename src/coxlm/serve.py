@@ -604,7 +604,7 @@ class Handler(BaseHTTPRequestHandler):
         # System One compatibility endpoint
         if self.path.startswith("/v1/systemone"):
             rid = uuid.uuid4().hex
-            hdr = {"x-typesafe-request-id": rid}
+            hdr = {"x-request-id": rid}
             try:
                 req = json.loads(raw)
                 resp = answer_systemone(req, infer_matrix, model_name=MODEL_NAME)
