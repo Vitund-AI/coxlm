@@ -28,11 +28,25 @@ class RemoteModel:
         self.url = url
         self.timeout = timeout
         self.headers = dict(headers or {})
+        self.closed = False
 
     def __repr__(self) -> str:
         return f"RemoteModel({self.url!r})"
 
+    def close(self) -> None:
+        """Stop using the server: later calls raise CoxlmError. (Requests do not hold a connection open today, so
+        nothing else needs releasing; a pooled connection, if added, is closed here.)"""
+        self.closed = True
+
+    def __enter__(self) -> "RemoteModel":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
+        if self.closed:
+            raise CoxlmError(f"this model was closed; connect to {self.url} again to use it")
         data = None if body is None else json.dumps(body).encode()
         req = urllib.request.Request(self.url + path, data=data, method=method,
                                      headers={"Content-Type": "application/json", **self.headers})

@@ -135,6 +135,19 @@ with open("tickets.txt") as f:
             flag_for_refund(ans)
 ```
 
+### Releasing a model
+
+Both kinds of model work as context managers. A local model's weights and GPU memory are released when the block
+ends, so a script can run one model after another on the same GPU:
+
+```python
+with coxlm.load("path/to/model.pt") as model:
+    results = model.decide_batch(texts, Ticket)
+# the GPU memory is free again here
+```
+
+`model.close()` does the same without a `with` block. A closed model raises an error if it is used again.
+
 ## The three question types
 
 | type | build it with | what you read |

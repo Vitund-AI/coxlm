@@ -80,4 +80,4 @@ def test_public_api_surface():
     for name in ("connect", "load", "questions", "choice", "score", "yesno", "Answer", "Answers", "Questions", "Schema",
                  "__version__"):
         assert hasattr(coxlm, name)
-    assert coxlm.__version__ == "0.2.0"
+    assert coxlm.__version__ == "0.2.1"

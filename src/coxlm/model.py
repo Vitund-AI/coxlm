@@ -95,6 +95,33 @@ class AmortizedDecisionModel(nn.Module):
     def device(self) -> torch.device:
         return self.proj.weight.device
 
+    def close(self) -> None:
+        """Release the model: drops the backbone and readout weights and the cached option encodings, and returns the
+        freed GPU memory to the device. Later calls raise RuntimeError. ``with coxlm.load(...) as model:`` calls
+        this at the end of the block."""
+        import gc
+
+        if getattr(self, "closed", False):
+            return
+        dev = self.device
+        self._cache.clear()
+        self.__dict__.pop("_tok_memo", None)
+        self.encoder = None
+        self.pointer_q = self.pointer_k = None
+        self._modules.clear()
+        self._parameters.clear()
+        self._buffers.clear()
+        self.closed = True
+        gc.collect()
+        if dev.type == "cuda":
+            torch.cuda.empty_cache()
+
+    def __enter__(self) -> "AmortizedDecisionModel":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
     def set_readout(self, mode: str, dp: int = 256) -> None:
         """'slot' (default) or 'pointer' (see the module docstring). Pointer mode adds a bilinear head (dp = its width)."""
         if mode not in ("slot", "pointer"):
@@ -428,6 +455,9 @@ class AmortizedDecisionModel(nn.Module):
 
     def _decide(self, states: list, questions, stacklevel: int) -> list:
         import warnings
+
+        if getattr(self, "closed", False):
+            raise RuntimeError("this model was closed; load it again to use it")
 
         schema = as_schema(questions)
         features = getattr(self, "trained_features", set())

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 (2026-10-06)
+
+- Models are context managers: `with coxlm.load(path) as model:` releases the weights and the GPU memory at the end
+  of the block, and `with coxlm.connect(url) as model:` closes the client. `close()` does the same directly; a closed
+  model raises an error if used again.
+
 ## 0.2.0 (2026-10-06)
 
 API changes (breaking):

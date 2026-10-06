@@ -138,3 +138,14 @@ def test_match_on_pick_and_patterns():
         case _:
             hit = "other"
     assert hit == "refund"
+
+
+def test_remote_model_as_a_context_manager(server):
+    url, fake = server
+    with coxlm.connect(url) as model:
+        ans = model.decide(TEXT, Ticket)
+        assert ans == fake.decide(TEXT, Ticket)
+    assert model.closed
+    with pytest.raises(coxlm.CoxlmError, match="closed"):
+        model.decide(TEXT, Ticket)
+    model.close()  # closing twice is fine
