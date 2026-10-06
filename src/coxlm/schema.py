@@ -28,8 +28,12 @@ than merely named.
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, overload
+
+if TYPE_CHECKING:
+    from .decide import Answer
 
 MAX_CARDINALITY = 255  # an 8-bit output head; higher cardinality needs a two-stage score-then-choose
 
@@ -42,6 +46,9 @@ NONE_OPTION = "none_of_these"
 NONE_DESCRIPTIONS = {"choice": "none of the other options fits", "score": "the true level is outside the offered range"}
 # accepted on input only (older spec files and payloads); never emitted
 KIND_ALIASES = {"noul": "yesno", "boolean": "yesno", "bool": "yesno"}
+# names an answer set already uses (its mapping methods): a question with one of these names is still readable as
+# answers["name"], but not as answers.name
+RESERVED_NAMES = frozenset({"keys", "items", "values", "get"})
 
 
 @dataclass(frozen=True)
@@ -93,6 +100,18 @@ class Field:
                 raise ValueError(f"field {self.name!r}: values must align with options ({len(self.options)})")
             if any(b <= a for a, b in zip(self.values, self.values[1:])):
                 raise ValueError(f"field {self.name!r}: values must be strictly increasing (levels run low -> high)")
+
+    # A Field written as a class attribute of a coxlm.Questions subclass doubles as the accessor for its answer:
+    # on the class it is the question (Ticket.team), on an answer instance it is the answer (ans.team).
+    @overload
+    def __get__(self, obj: None, owner: Any = None) -> "Field": ...
+    @overload
+    def __get__(self, obj: object, owner: Any = None) -> "Answer": ...
+
+    def __get__(self, obj, owner=None):
+        if obj is None:
+            return self
+        return obj[self.name]
 
     @property
     def cardinality(self) -> int:
@@ -263,6 +282,10 @@ def questions(**fields: Field) -> Schema:
     """
     from dataclasses import replace
 
+    for name in fields:
+        if name in RESERVED_NAMES:
+            warnings.warn(f"question name {name!r} is also an answer-set method: read it as answers[{name!r}], "
+                          f"not answers.{name}", stacklevel=2)
     return Schema(tuple(replace(f, name=name) for name, f in fields.items()))
 
 

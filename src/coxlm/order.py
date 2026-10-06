@@ -228,7 +228,7 @@ def order_items(model, items, mode="score", instructions="", context="", seed=0,
         positions = [_ordinal(k) for k in range(1, n + 1)]
         fields = {f"item_{i}": score(positions, instructions=f'{instr} Which position does this item occupy: "{items[i]}"?')
                   for i in range(n)}
-        [ans] = model.decide([state], questions(**fields))
+        ans = model.decide(state, questions(**fields))
         exp = {i: ans[f"item_{i}"].score for i in range(n)}          # 1-based expected position
         dist = {i: ans[f"item_{i}"].probabilities for i in range(n)}
         argmax = {i: max(range(n), key=lambda k: list(dist[i].values())[k]) for i in range(n)}
@@ -248,7 +248,7 @@ def order_items(model, items, mode="score", instructions="", context="", seed=0,
         pairs = [(i, j) for i in range(n) for j in range(i + 1, n)]
         fields = {f"p_{i}_{j}": yesno(f'{instr} Does "{items[i]}" precede "{items[j]}"?')
                   for i, j in pairs}
-        [ans] = model.decide([state], questions(**fields))
+        ans = model.decide(state, questions(**fields))
         P = {}
         for i, j in pairs:
             p = ans[f"p_{i}_{j}"].p_yes

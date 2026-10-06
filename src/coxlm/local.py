@@ -14,7 +14,7 @@ _BUILD_KEYS = ("state_norm", "pool")
 
 def load(path: str | os.PathLike, encoder: str | None = None, device: str | None = None, dtype: str | None = None,
          max_length: int = 2048):
-    """Load a checkpoint for local inference. Returns the model; call ``model.decide(states, schema)``.
+    """Load a checkpoint for local inference. Returns the model; call ``model.decide(state, questions)``.
 
     ``encoder`` is the Hugging Face backbone the checkpoint was trained on (e.g. "Qwen/Qwen3.5-4B-Base");
     it defaults to the one recorded in the checkpoint. Adapter (LoRA) and full-weight checkpoints are told

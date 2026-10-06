@@ -7,11 +7,11 @@ import threading
 
 import pytest
 
-from coxlm.decide import answers_for, render_state
+from coxlm.decide import answers_for, as_schema, iter_batches, render_state
 
 
 class FakeModel:
-    """decide(states, schema) with deterministic, state-dependent distributions; records its calls."""
+    """decide / decide_batch with deterministic, state-dependent distributions; records its calls."""
 
     max_length = 2048
     tokenizer = None
@@ -19,7 +19,15 @@ class FakeModel:
     def __init__(self):
         self.calls = []
 
-    def decide(self, states, schema):
+    def decide(self, state, questions):
+        return self.decide_batch([state], questions)[0]
+
+    def decide_iter(self, states, questions, batch_size=32):
+        for batch in iter_batches(states, batch_size):
+            yield from self.decide_batch(batch, questions)
+
+    def decide_batch(self, states, questions):
+        schema = as_schema(questions)
         self.calls.append((list(states), schema))
         out = []
         for st in states:
@@ -30,7 +38,7 @@ class FakeModel:
                           for o in f.all_options]
                 z = sum(math.exp(x) for x in logits)
                 pred[f.name] = [math.exp(x) / z for x in logits]
-            out.append(answers_for(schema, pred))
+            out.append(answers_for(questions, pred))
         return out
 
 

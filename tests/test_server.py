@@ -31,9 +31,9 @@ def test_quickstart_through_connect(server):
         team=choice(["billing", "support", "sales"], instructions="Which team handles this?"),
         urgency=score(["low", "medium", "high"], instructions="How urgent is it?"),
         refund=yesno("Is the customer asking for a refund?"))
-    [ans] = model.decide(["My card was charged twice!!"], schema)
+    ans = model.decide("My card was charged twice!!", schema)
     # the remote answers equal what the model computed in-process
-    [local] = fake.decide(["My card was charged twice!!"], schema)
+    local = fake.decide("My card was charged twice!!", schema)
     assert ans == local
     assert fake.calls[0][1] == schema  # the server rebuilt exactly the client's schema
     assert ans["team"].choice in ("billing", "support", "sales")
@@ -48,8 +48,10 @@ def test_structured_states_and_many_states(server):
     model = coxlm.connect(url)
     schema = questions(spam=yesno("Is this spam?"), lang=choice(["en", "de"], instructions="Language?"))
     states = ["hello", {"subject": "WIN", "body": "click"}, ["msg one", "msg two"]] * 15  # 45 > one batch of 32
-    out = model.decide(states, schema)
-    assert len(out) == 45 and out[1] == fake.decide([{"subject": "WIN", "body": "click"}], schema)[0]
+    out = model.decide_batch(states, schema)
+    assert len(out) == 45 and out[1] == fake.decide({"subject": "WIN", "body": "click"}, schema)
+    # a list passed to decide() is ONE state (numbered lines), not a batch
+    assert model.decide(["msg one", "msg two"], schema) == out[2]
 
 
 def test_decide_wire_format(server):
@@ -98,7 +100,7 @@ def test_other_endpoints(server):
 
 def test_unreachable_server_raises():
     with pytest.raises(coxlm.CoxlmError):
-        coxlm.connect("http://127.0.0.1:9", timeout=2).decide(["x"], questions(a=yesno("ok?")))
+        coxlm.connect("http://127.0.0.1:9", timeout=2).decide("x", questions(a=yesno("ok?")))
 
 
 def test_import_does_not_import_torch():

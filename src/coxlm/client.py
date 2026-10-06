@@ -7,8 +7,9 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from typing import Any, Iterable, Iterator, overload
 
-from .decide import Answer
+from .decide import Answers, Q, answers_class, as_schema, iter_batches
 from .schema import Schema
 from .wire import answer_from_json, decide_request
 
@@ -18,7 +19,7 @@ class CoxlmError(RuntimeError):
 
 
 class RemoteModel:
-    """Same contract as a locally loaded model: ``decide(states, schema) -> list[dict[name, Answer]]``."""
+    """Same contract as a locally loaded model: ``decide(state, questions)`` and ``decide_batch(states, questions)``."""
 
     def __init__(self, url: str, timeout: float = 120.0, headers: dict[str, str] | None = None) -> None:
         url = url.rstrip("/")
@@ -53,20 +54,50 @@ class RemoteModel:
     def health(self) -> dict:
         return self._request("GET", "/health")
 
-    def decide(self, states: list, schema: Schema) -> list[dict[str, Answer]]:
-        """States (str, dict or list each) -> typed answers per field, one dict per state."""
-        if isinstance(states, (str, bytes)):
-            raise TypeError("decide() takes a list of states; wrap a single state as [state]")
-        if not isinstance(schema, Schema):
-            raise TypeError("schema must be a coxlm Schema, e.g. from coxlm.questions(...)")
-        out = self._request("POST", "/v1/decide", decide_request(list(states), schema))
+    @overload
+    def decide(self, state: Any, questions: type[Q]) -> Q: ...
+    @overload
+    def decide(self, state: Any, questions: Schema) -> Answers: ...
+
+    def decide(self, state, questions):
+        """One state (str, dict or list) -> its answers; a Questions subclass comes back as an instance of itself."""
+        return self._decide([state], questions)[0]
+
+    @overload
+    def decide_batch(self, states: Iterable[Any], questions: type[Q]) -> list[Q]: ...
+    @overload
+    def decide_batch(self, states: Iterable[Any], questions: Schema) -> list[Answers]: ...
+
+    def decide_batch(self, states, questions):
+        """Several states in one request -> one answers object per state, in order."""
+        if isinstance(states, (str, bytes, dict)):
+            raise TypeError("decide_batch() takes a list of states; for one state use decide(state, questions)")
+        return self._decide(list(states), questions)  # any iterable; consumed whole
+
+    @overload
+    def decide_iter(self, states: Iterable[Any], questions: type[Q], batch_size: int = 32) -> Iterator[Q]: ...
+    @overload
+    def decide_iter(self, states: Iterable[Any], questions: Schema, batch_size: int = 32) -> Iterator[Answers]: ...
+
+    def decide_iter(self, states, questions, batch_size=32):
+        """Any iterable of states (a generator, a file, a cursor) -> answers one state at a time, in order, sent in
+        batches of ``batch_size`` behind the scenes. Nothing is read ahead beyond the current batch."""
+        if isinstance(states, (str, bytes, dict)):
+            raise TypeError("decide_iter() takes an iterable of states; for one state use decide(state, questions)")
+        for batch in iter_batches(states, batch_size):
+            yield from self._decide(batch, questions)
+
+    def _decide(self, states: list, questions) -> list:
+        schema = as_schema(questions)
+        cls = answers_class(questions)
+        out = self._request("POST", "/v1/decide", decide_request(states, schema))
         if "error" in out:
             err = out["error"]
             raise CoxlmError(err.get("message", str(err)) if isinstance(err, dict) else str(err))
         rows = out.get("answers") or []
         if len(rows) != len(states):
             raise CoxlmError(f"server returned {len(rows)} answers for {len(states)} states")
-        return [{name: answer_from_json(a) for name, a in row.items()} for row in rows]
+        return [cls({name: answer_from_json(a) for name, a in row.items()}) for row in rows]
 
 
 def connect(url: str, timeout: float = 120.0, headers: dict[str, str] | None = None) -> RemoteModel:

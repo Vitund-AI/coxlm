@@ -31,7 +31,7 @@ Python 3.10 or newer. The base install uses only the standard library. Importing
 
 ```python
 import coxlm
-from coxlm import questions, choice, score, yesno
+from coxlm import Questions, choice, score, yesno
 
 # Connect to a running coxlm server (no GPU or PyTorch needed on this machine)
 model = coxlm.connect("http://localhost:8000")
@@ -39,32 +39,101 @@ model = coxlm.connect("http://localhost:8000")
 # Or run a checkpoint on your own GPU (pip install "coxlm[local]"):
 # model = coxlm.load("path/to/model.pt")
 
-# Three questions, one of each type
-schema = questions(
-    team=choice(["billing", "support", "sales"], instructions="Which team handles this?"),
-    urgency=score(["low", "medium", "high"], instructions="How urgent is it?"),
-    refund=yesno("Is the customer asking for a refund?"),
-)
 
-# decide() takes a list of texts and returns one result per text
-answers = model.decide(["My card was charged twice!!"], schema)
-ans = answers[0]
+# The questions, as a class: one attribute per question
+class Ticket(Questions):
+    team = choice(["billing", "support", "sales"], instructions="Which team handles this?")
+    urgency = score(["low", "medium", "high"], instructions="How urgent is it?")
+    refund = yesno("Is the customer asking for a refund?")
+
+
+# One text in, one Ticket out
+ans = model.decide("My card was charged twice!!", Ticket)
 
 # Each answer carries its probabilities, so the code can act on how sure the model is
-if ans["refund"].p_yes > 0.8:
+if ans.refund.p_yes > 0.8:
     print("Refund request")
-elif ans["team"].confidence < 0.6:
-    print("Unsure which team:", ans["team"].probabilities)
+elif ans.team.confidence < 0.6:
+    print("Unsure which team:", ans.team.probabilities)
 else:
-    print("Route to", ans["team"].choice)
-print("Urgency (1 = low, 3 = high):", round(ans["urgency"].score, 1))
+    print("Route to", ans.team.choice)
+print("Urgency (1 = low, 3 = high):", round(ans.urgency.score, 1))
 ```
 
-`connect()` and `load()` return models with the same contract:
-`decide(states, schema)` returns one dict per state that maps each question
-name to an `Answer`. A state can be a string, a dict (rendered as `key: value`
-lines) or a list (rendered as numbered lines). Every question in the schema is
-answered in the same pass and independently of the others.
+`connect()` and `load()` return models with the same methods:
+
+| method | takes | returns |
+|---|---|---|
+| `decide(state, questions)` | one state | its answers |
+| `decide_batch(states, questions)` | a list (or any iterable) of states | a list of answers, in order, from one request |
+| `decide_iter(states, questions, batch_size=32)` | any iterable: a generator, a file, a cursor | answers one at a time, in order, sent in batches |
+
+A state can be a string, a dict (rendered as `key: value` lines) or a list (rendered as numbered lines), so a list
+passed to `decide` is one state, not several. Every question is answered in the same pass and independently of the
+others.
+
+`questions` is a `Questions` subclass, as above, or a schema built with `questions(...)`:
+
+```python
+from coxlm import questions
+
+schema = questions(
+    team=choice(["billing", "support", "sales"], instructions="Which team handles this?"),
+    refund=yesno("Is the customer asking for a refund?"),
+)
+ans = model.decide("My card was charged twice!!", schema)
+```
+
+Either way, answers are read by attribute (`ans.team`) or by name (`ans["team"]`), and iterate like a dict
+(`for name, answer in ans.items()`). With a class, the answers are an instance of it: editors complete `ans.` with
+your question names, and type checkers report a misspelt one. Subclasses inherit their parents' questions.
+
+## Using answers in your code
+
+Being unsure is a case of its own. `pick(min_confidence)` returns the top option (`"yes"` or `"no"` for a yes/no
+question) when the model is at least that sure, and `None` otherwise, so a `match` can branch on it:
+
+```python
+match ans.team.pick(0.7):
+    case "billing":
+        send_to_billing(ticket)
+    case "support" | "sales" as team:
+        send_to(team, ticket)
+    case None:
+        ask_a_person(ticket)        # the model is not sure which team
+```
+
+Answers also work with Python's structural patterns:
+
+```python
+from coxlm import Answer
+
+match ans.team:
+    case Answer(choice="billing", confidence=c) if c > 0.9:
+        refund_automatically(ticket)
+    case Answer(choice="billing"):
+        queue_for_billing(ticket)
+
+match ans:
+    case {"refund": Answer(p_yes=p)} if p > 0.8:
+        start_refund(ticket)
+```
+
+`ranked()` lists the options most likely first, for "the two most likely teams" or a fallback order:
+
+```python
+for team, p in ans.team.ranked()[:2]:
+    print(f"{team}: {p:.0%}")
+```
+
+Large inputs stream through `decide_iter` without being held in memory:
+
+```python
+with open("tickets.txt") as f:
+    for ans in model.decide_iter((line.strip() for line in f), Ticket, batch_size=64):
+        if ans.refund.pick(0.9) == "yes":
+            flag_for_refund(ans)
+```
 
 ## The three question types
 
@@ -73,6 +142,8 @@ answered in the same pass and independently of the others.
 | choice | `choice(options, instructions="...")` | `.choice` (the top option), `.confidence` (its probability), `.probabilities` |
 | score | `score(levels, instructions="...", values=None)` | `.score` (the expected level, which can fall between two levels), `.confidence`, `.probabilities`, `.legend` |
 | yes/no | `yesno("question", criteria=None)` | `.p_yes` (P(yes)), `.confidence`, `.probabilities` |
+
+Every answer also has `.pick(min_confidence)` and `.ranked()` (see [Using answers in your code](#using-answers-in-your-code)).
 
 - `options` / `levels` is a list of names or a dict `{name: description}`.
   Descriptions are read by the model, so a short definition of each option helps.

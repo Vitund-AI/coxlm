@@ -36,7 +36,8 @@ from .systemone import answer_systemone
 from .wire import decide_response, schema_from_json
 
 # torch is imported lazily (only to load the model and to time GPU work), so the server
-# logic runs with any object that has decide(states, schema) -- e.g. a fake model in tests
+# logic runs with any object that has decide(state, schema) and decide_batch(states, schema) -- e.g. a fake model
+# in tests
 MODEL = None
 MODEL_NAME = "coxlm"  # reported by /v1/models and echoed in responses
 CHECKPOINT = ""  # path of the loaded checkpoint, reported by /health
@@ -451,7 +452,7 @@ def infer_matrix(q):
         sync(); t0 = time.perf_counter()
         if has_fields:
             for i in range(0, len(texts), MAX_BATCH):
-                answers.extend(MODEL.decide(texts[i:i + MAX_BATCH], schema))
+                answers.extend(MODEL.decide_batch(texts[i:i + MAX_BATCH], schema))
         else:
             answers = [{} for _ in texts]
         sync(); infer_ms = (time.perf_counter() - t0) * 1000
@@ -507,7 +508,7 @@ def infer(q):
         with LOCK:
             sync(); t0 = time.perf_counter()
             for i in range(0, len(texts), MAX_BATCH):  # chunk so a huge list can't OOM
-                answers.extend(MODEL.decide(texts[i:i + MAX_BATCH], schema))
+                answers.extend(MODEL.decide_batch(texts[i:i + MAX_BATCH], schema))
             sync(); infer_ms = (time.perf_counter() - t0) * 1000
         results = []
         for idx, ((rid, text), ans) in enumerate(zip(parsed, answers)):
@@ -522,7 +523,7 @@ def infer(q):
     n_state = _tok_count(state_text)
     with LOCK:
         sync(); t0 = time.perf_counter()
-        [ans] = MODEL.decide([state_text], schema)
+        ans = MODEL.decide(state_text, schema)
         sync(); infer_ms = (time.perf_counter() - t0) * 1000
     return {"fields": _fields(ans), "infer_ms": round(infer_ms, 1), "truncated": n_state > cap, "state_tokens": n_state, "cap": cap}
 
@@ -539,7 +540,7 @@ def decide(req):
     with LOCK:
         _sync(); t0 = time.perf_counter()
         for i in range(0, len(states), MAX_BATCH):
-            answers.extend(MODEL.decide(states[i:i + MAX_BATCH], schema))
+            answers.extend(MODEL.decide_batch(states[i:i + MAX_BATCH], schema))
         _sync(); infer_ms = (time.perf_counter() - t0) * 1000
     return decide_response(answers, MODEL_NAME, infer_ms)
 

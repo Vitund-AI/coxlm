@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Any, Iterable, Iterator, overload
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .decide import Answer, answers_for, render_state
+from .decide import Answers, Q, answers_for, as_schema, iter_batches, render_state
 from .schema import Schema
 
 
@@ -388,14 +390,46 @@ class AmortizedDecisionModel(nn.Module):
             self.train()
         return [{schema.fields[i].name: probs[i][b].cpu().tolist() for i in range(len(schema))} for b in range(len(states))]
 
-    def decide(self, states: list, schema: Schema) -> list[dict[str, Answer]]:
-        """States (str, dict or list each) -> typed answers per field, one dict per state.
+    @overload
+    def decide(self, state: Any, questions: type[Q]) -> Q: ...
+    @overload
+    def decide(self, state: Any, questions: Schema) -> Answers: ...
 
-        This is the API surface: every question in ``schema`` is answered in the
-        same forward pass, independently, with a full distribution, a confidence,
-        and the kind-specific reading (choice / score / yesno)."""
+    def decide(self, state, questions):
+        """One state (a string, a dict rendered as "key: value" lines, or a list rendered as numbered lines) ->
+        its answers. ``questions`` is a ``questions(...)`` schema or a ``Questions`` subclass; with a subclass the
+        answers come back as an instance of it. Every question is answered in the same forward pass,
+        independently, with a full distribution, a confidence, and the kind-specific reading."""
+        return self._decide([state], questions, stacklevel=3)[0]
+
+    @overload
+    def decide_batch(self, states: Iterable[Any], questions: type[Q]) -> list[Q]: ...
+    @overload
+    def decide_batch(self, states: Iterable[Any], questions: Schema) -> list[Answers]: ...
+
+    def decide_batch(self, states, questions):
+        """Several states in one call -> one answers object per state, in order."""
+        if isinstance(states, (str, bytes, dict)):
+            raise TypeError("decide_batch() takes a list of states; for one state use decide(state, questions)")
+        return self._decide(list(states), questions, stacklevel=3)
+
+    @overload
+    def decide_iter(self, states: Iterable[Any], questions: type[Q], batch_size: int = 32) -> Iterator[Q]: ...
+    @overload
+    def decide_iter(self, states: Iterable[Any], questions: Schema, batch_size: int = 32) -> Iterator[Answers]: ...
+
+    def decide_iter(self, states, questions, batch_size=32):
+        """Any iterable of states (a generator, a file, a cursor) -> answers one state at a time, in order, sent in
+        batches of ``batch_size`` behind the scenes. Nothing is read ahead beyond the current batch."""
+        if isinstance(states, (str, bytes, dict)):
+            raise TypeError("decide_iter() takes an iterable of states; for one state use decide(state, questions)")
+        for batch in iter_batches(states, batch_size):
+            yield from self._decide(batch, questions, stacklevel=3)
+
+    def _decide(self, states: list, questions, stacklevel: int) -> list:
         import warnings
 
+        schema = as_schema(questions)
         features = getattr(self, "trained_features", set())
         reads_stems = "channel_ablation" in features
         bare = [f.name for f in schema if f.kind == "yesno" and not (f.descriptions and any(f.descriptions)) and not (reads_stems and f.instructions)]
@@ -405,7 +439,7 @@ class AmortizedDecisionModel(nn.Module):
                 "names 'no' and 'yes'; this checkpoint tells them apart only by their option descriptions and ignores "
                 "the instructions, so the answers are unreliable and may invert. "
                 "Pass criteria={'no': ..., 'yes': ...}, or use a checkpoint that reads instructions.",
-                stacklevel=2,
+                stacklevel=stacklevel,
             )
         unseen_none = [f.name for f in schema if f.none_option] if "none_option" not in features else []
         if unseen_none:
@@ -413,10 +447,10 @@ class AmortizedDecisionModel(nn.Module):
                 f"field(s) {unseen_none} offer none_of_these, but this checkpoint was not trained with the none option. "
                 "To it that is an untrained option: it will rarely be chosen even when nothing offered fits. "
                 "Remove none_option, or use a checkpoint trained with it.",
-                stacklevel=2,
+                stacklevel=stacklevel,
             )
         preds = self.predict([render_state(s) for s in states], schema)
-        return [answers_for(schema, p) for p in preds]
+        return [answers_for(questions, p) for p in preds]
 
 
 CAUSAL_MODEL_TYPES = {"qwen2", "qwen3", "llama", "mistral", "gemma", "gemma2", "gemma3", "gemma3_text", "phi3", "olmo2", "smollm3",
