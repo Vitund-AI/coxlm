@@ -502,6 +502,20 @@ def _enable_hub_conv1d() -> None:
         sys.path.insert(0, shims)
 
 
+def _no_init_weights():
+    """transformers' context that skips random initialisation (moved between versions); a no-op if neither exists."""
+    from contextlib import nullcontext
+
+    try:
+        from transformers.initialization import no_init_weights
+    except ImportError:
+        try:
+            from transformers.modeling_utils import no_init_weights
+        except ImportError:  # pragma: no cover
+            return nullcontext()
+    return no_init_weights()
+
+
 def build_model(
     encoder_name: str,
     dtype: str | None = None,
@@ -509,6 +523,7 @@ def build_model(
     state_norm: bool | str | None = None,
     lora_r: int = 0,
     lora_alpha: int | None = None,
+    pretrained_weights: bool = True,
     **kwargs,
 ) -> AmortizedDecisionModel:
     """Build the model on a pretrained backbone (downloads on first use), ready for a checkpoint's weights.
@@ -516,7 +531,8 @@ def build_model(
     Any model that returns per-token hidden states works: a bidirectional encoder (ModernBERT) or a decoder LLM used
     as an encoder (Qwen3, Qwen3.5). ``dtype`` "bf16" loads the backbone in bfloat16 (the head stays fp32); ``pool``
     defaults to "last" for causal model types and "mean" otherwise. ``lora_r`` > 0 attaches empty LoRA adapters for
-    an adapter checkpoint to fill.
+    an adapter checkpoint to fill. ``pretrained_weights=False`` builds the backbone from its configuration alone
+    (no weight download, no initialisation), for a full-weight checkpoint that supplies every backbone weight.
     """
     from transformers import AutoConfig, AutoModel, AutoTokenizer
 
@@ -539,7 +555,11 @@ def build_model(
             load_kw["use_kernels"] = True
         except ImportError:
             pass
-    encoder = AutoModel.from_pretrained(encoder_name, **load_kw)
+    if pretrained_weights:
+        encoder = AutoModel.from_pretrained(encoder_name, **load_kw)
+    else:
+        with _no_init_weights():
+            encoder = AutoModel.from_config(config, dtype=torch_dtype) if torch_dtype else AutoModel.from_config(config)
     if config.model_type in MULTIMODAL_TEXT:
         # load the whole checkpoint (so every weight name matches), then keep only the text model
         encoder = getattr(encoder, MULTIMODAL_TEXT[config.model_type])

@@ -47,7 +47,16 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
     dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
     if str(dev).startswith("cpu"):  # the hub causal-conv1d kernel is CUDA-only
         os.environ.setdefault("COX_HUB_CONV1D", "0")
-    model = build_model(encoder, lora_r=lora_r, **kwargs).to(dev)
+    # a full-weight checkpoint (every backbone weight present, no LoRA) needs only the backbone's configuration:
+    # downloading and initialising the pretrained weights would be wasted, since all of them are overwritten
+    full = lora_r == 0 and any(k.startswith("encoder.") for k in state)
+    model = build_model(encoder, lora_r=lora_r, pretrained_weights=not full, **kwargs)
+    if full:
+        expected = {"encoder." + k for k in model.encoder.state_dict()}
+        missing = sorted(expected - set(state))
+        if missing:
+            raise ValueError(f"{source}: full-weight checkpoint lacks {len(missing)} backbone weights, e.g. {missing[:3]}")
+    model = model.to(dev)
     load_state(model, state)
     del state
     model.eval()
