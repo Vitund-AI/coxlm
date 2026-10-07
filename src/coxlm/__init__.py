@@ -31,7 +31,7 @@ __version__ = "0.2.1"
 
 
 def load(path, encoder: str | None = None, device: str | None = None, dtype: str | None = None,
-         max_length: int = 2048):
+         max_length: int = 2048, revision: str | None = None):
     """Load a checkpoint for local GPU inference (needs ``pip install "coxlm[local]"``).
 
     Returns a model with the same ``decide(state, questions)`` / ``decide_batch(states, questions)`` contract as
@@ -42,7 +42,7 @@ def load(path, encoder: str | None = None, device: str | None = None, dtype: str
         import torch  # noqa: F401
     except ImportError as e:  # pragma: no cover - depends on the environment
         raise ImportError('coxlm.load needs the local extra: pip install "coxlm[local]"') from e
-    return _load(path, encoder=encoder, device=device, dtype=dtype, max_length=max_length)
+    return _load(path, encoder=encoder, device=device, dtype=dtype, max_length=max_length, revision=revision)
 
 
 __all__ = [

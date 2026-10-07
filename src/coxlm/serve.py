@@ -643,7 +643,9 @@ def serve(model, port: int = 8000, host: str = "0.0.0.0", model_name: str | None
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="coxlm-serve", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--model", required=True, help="checkpoint path (model.pt)")
+    ap.add_argument("--model", required=True,
+                    help="checkpoint: a model.pt, a release folder, or a Hugging Face repo id (owner/name)")
+    ap.add_argument("--revision", default=None, help="Hugging Face repo only: a tag, branch or commit to pin")
     ap.add_argument("--encoder", default=None, help="backbone, e.g. Qwen/Qwen3.5-4B-Base (default: recorded in the checkpoint)")
     ap.add_argument("--dtype", default=None, help="backbone dtype: bf16 / fp16 / fp32 (default: bf16, as models are trained and evaluated)")
     ap.add_argument("--host", default="0.0.0.0")
@@ -655,7 +657,8 @@ def main(argv=None) -> None:
     from .local import load
 
     print(f"loading {args.model}...", flush=True)
-    model = load(args.model, encoder=args.encoder, device=args.device, dtype=args.dtype, max_length=args.max_length)
+    model = load(args.model, encoder=args.encoder, device=args.device, dtype=args.dtype, max_length=args.max_length,
+                 revision=args.revision)
     httpd = serve(model, port=args.port, host=args.host, model_name=args.model_name,
                   encoder=model.encoder_name, checkpoint=args.model)
     infer({"state": "warmup", "question": "warm?", "type": "yesno", "options": ""})  # compile kernels before the first request

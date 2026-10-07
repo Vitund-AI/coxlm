@@ -13,7 +13,7 @@ _BUILD_KEYS = ("state_norm", "pool")
 
 
 def load(path: str | os.PathLike, encoder: str | None = None, device: str | None = None, dtype: str | None = None,
-         max_length: int = 2048):
+         max_length: int = 2048, revision: str | None = None):
     """Load a checkpoint for local inference. Returns the model; call ``model.decide(state, questions)``.
 
     ``encoder`` is the Hugging Face backbone the checkpoint was trained on (e.g. "Qwen/Qwen3.5-4B-Base");
@@ -23,9 +23,11 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
     """
     import torch
 
-    from .checkpoint import check_supported, checkpoint_lora_r, checkpoint_meta, load_state, read_checkpoint
+    from .checkpoint import check_supported, checkpoint_lora_r, checkpoint_meta, load_state, read_checkpoint, resolve
     from .model import build_model
 
+    source = str(path)
+    path = resolve(path, revision=revision)
     state = read_checkpoint(path)
     meta = checkpoint_meta(state)
     encoder = encoder or meta.get("encoder")
@@ -51,5 +53,5 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
     model.eval()
     model.max_length = max_length
     model.encoder_name = encoder
-    model.checkpoint_path = str(path)
+    model.checkpoint_path = source
     return model

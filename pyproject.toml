@@ -37,6 +37,8 @@ local = [
     "torch>=2.1",
     "transformers>=5.17",  # tested minimum: from_pretrained(dtype=), Qwen3.5 backbones
     "peft",                # LoRA adapter checkpoints
+    "safetensors",         # release folders (model.safetensors + config.json)
+    "huggingface_hub",     # coxlm.load("owner/name") from the Hugging Face Hub
 ]
 # coxlm-serve (the server itself is standard library; it needs the model)
 serve = ["coxlm[local]"]

@@ -21,13 +21,66 @@ from .model import AmortizedDecisionModel
 META_KEY = "__cox_meta__"
 
 
+HUB_FILES = ["config.json", "*.safetensors", "*.safetensors.index.json", "README.md", "LICENSE"]
+
+
+def resolve(path: str | os.PathLike, revision: str | None = None) -> str:
+    """A local checkpoint (model.pt, a .safetensors file or a release folder), or a Hugging Face repo id such as
+    "Vitund/cox-4b-research", downloaded on first use and cached (needs huggingface_hub; private repos use your
+    `hf auth login`). ``revision`` pins a tag, branch or commit of a Hub repo."""
+    import re
+
+    path = os.fspath(path)
+    if os.path.exists(path):
+        return path
+    if re.fullmatch(r"[\w.-]+/[\w.-]+", path):
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as e:  # pragma: no cover - depends on the environment
+            raise ImportError("loading from the Hugging Face Hub needs huggingface_hub: pip install huggingface_hub") from e
+        return snapshot_download(repo_id=path, revision=revision, allow_patterns=HUB_FILES)
+    raise FileNotFoundError(f"{path}: no such checkpoint file or folder, and not a Hugging Face repo id (owner/name)")
+
+
 def read_checkpoint(path: str | os.PathLike) -> dict:
-    """The checkpoint's state dict, memory-mapped where possible: tensors are paged in as they are
-    copied into the model, so a large full-weight checkpoint is never held in RAM twice."""
+    """The checkpoint's state dict, with its metadata under META_KEY. Reads a torch model.pt (memory-mapped where
+    possible, so a large checkpoint is never held in RAM twice), or a release folder / .safetensors file with its
+    config.json beside it (the Hugging Face release format, written by the research repo's hf_release.py)."""
+    path = os.fspath(path)
+    if os.path.isdir(path) or path.endswith(".safetensors"):
+        return _read_release(path)
     try:
         return torch.load(path, map_location="cpu", mmap=True)
     except (RuntimeError, ValueError):  # legacy (non-zipfile) checkpoints cannot be memory-mapped
         return torch.load(path, map_location="cpu")
+
+
+def _read_release(path: str) -> dict:
+    import json
+
+    from safetensors.torch import load_file
+
+    folder = path if os.path.isdir(path) else os.path.dirname(path)
+    config_path = os.path.join(folder, "config.json")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"{folder}: no config.json beside the weights")
+    config = json.load(open(config_path))
+    if int(config.get("coxlm_format", 0)) != 1:
+        raise ValueError(f"{config_path}: not a coxlm release (coxlm_format {config.get('coxlm_format')!r}); "
+                         "upgrade coxlm if it is newer")
+    index = os.path.join(folder, "model.safetensors.index.json")
+    if os.path.isdir(path) and os.path.exists(index):  # sharded weights
+        files = sorted(set(json.load(open(index))["weight_map"].values()))
+    elif os.path.isdir(path):
+        files = ["model.safetensors"]
+    else:
+        files = [os.path.basename(path)]
+    state: dict = {}
+    for f in files:
+        state.update(load_file(os.path.join(folder, f)))
+    state[META_KEY] = {"encoder": config.get("encoder"), "build": config.get("build") or {},
+                       "features": config.get("features") or []}
+    return state
 
 
 def checkpoint_meta(state: dict) -> dict:
