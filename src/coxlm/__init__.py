@@ -27,7 +27,7 @@ from .decide import Answer, Answers, AnswerSet, Questions, render_state
 from .order import order_items
 from .schema import Field, Schema, choice, multilabel, multiscore, numeric_field, questions, score, yesno
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 
 def load(path, encoder: str | None = None, device: str | None = None, dtype: str | None = None,

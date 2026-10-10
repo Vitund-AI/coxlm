@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.3.0)
+## 0.3.0 (2026-10-09)
 
 - Pointer-readout models on hybrid backbones (Qwen3.5) now run. The states are encoded once with the cache on, and
   the cache is forked per branch: each option line continues from the state and its question head, the answer from

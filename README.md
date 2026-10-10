@@ -36,7 +36,8 @@ from coxlm import Questions, choice, score, yesno
 # Connect to a running coxlm server (no GPU or PyTorch needed on this machine)
 model = coxlm.connect("http://localhost:8000")
 
-# Or run a checkpoint on your own GPU (pip install "coxlm[local]"):
+# Or run a checkpoint on your own GPU (pip install "coxlm[local]"): a model.pt file, a release folder
+# (model.safetensors + config.json), or a Hugging Face repo id such as "owner/name"
 # model = coxlm.load("path/to/model.pt")
 
 
@@ -221,8 +222,11 @@ coxlm-serve --model path/to/model.pt --encoder Qwen/Qwen3.5-4B-Base --port 8000
 ```
 
 The checkpoint records the backbone it was trained on, so you can leave out
-`--encoder`. Adapter (LoRA) checkpoints and full-weight checkpoints are told
-apart automatically. `python -m coxlm.serve ...` does the same as `coxlm-serve`.
+`--encoder`. `--model` also takes a release folder (`model.safetensors` +
+`config.json`) or a Hugging Face repo id (`owner/name`, with `--revision` to pin a
+version). Adapter (LoRA) checkpoints and full-weight checkpoints are told apart
+automatically, and so are the two readouts: slot-head and pointer-head models
+both run, including pointer-head models on hybrid backbones such as Qwen3.5. `python -m coxlm.serve ...` does the same as `coxlm-serve`.
 The first run downloads the backbone from the Hugging Face Hub. The backbone
 runs in bf16, the precision models are trained and evaluated in, whatever
 precision the checkpoint was saved in (`--dtype` overrides it). A 4B backbone
