@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased (0.3.0)
+
+- Pointer-readout models on hybrid backbones (Qwen3.5) now run. The states are encoded once with the cache on, and
+  the cache is forked per branch: each option line continues from the state and its question head, the answer from
+  the head alone, and a yes/no question scored by the slot readout from the state with its whole block, as the
+  research models were trained. Branch rows run in chunks of at most `COXLM_FORK_TOKENS` tokens (default 16384), so
+  memory stays bounded for questions with many options. Checked against the research implementation on eight suite
+  tasks (77- and 100-option choices, yes/no, scores, several fields per text): identical answers, probabilities
+  within 0.0003 in fp32 (within 0.03 in bf16, kernel differences).
+- Load release folders and Hugging Face repos: `coxlm.load` and `coxlm-serve` accept a `model.pt`, a folder with
+  `model.safetensors` + `config.json`, or an `owner/name` repo id (downloaded and cached; `revision=` pins a version).
+  Full-weight checkpoints build the backbone from its configuration only, without downloading the base weights.
+
 ## 0.2.1 (2026-10-06)
 
 - Models are context managers: `with coxlm.load(path) as model:` releases the weights and the GPU memory at the end

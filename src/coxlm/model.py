@@ -17,10 +17,17 @@ mask, positions restarting after the state for every question. "replicate": one 
 the backbone's own causal mask, for backbones whose recurrent or linear-attention layers cannot take a custom mask
 (Qwen3.5 and other hybrids). Both give every question exactly the same view.
 
+The pointer readout on a hybrid backbone uses cache forks instead: the states are run once with the cache on, and
+the cache is then copied per branch row. Each option line continues from the state and its question head alone (one
+branch per option), the <answer> vector from the head and the block's closing tags alone (it does not see the options:
+separate branches' recurrent states cannot be merged), and a yes/no question scored by the slot readout from the
+state with its whole block. This is the layout the research models were trained with.
+
 coxlm ships this module for inference only.
 """
 from __future__ import annotations
 
+import copy
 import os
 import sys
 from typing import Any, Iterable, Iterator, overload
@@ -145,7 +152,10 @@ class AmortizedDecisionModel(nn.Module):
 
     def _backbone_hidden(self, **kw) -> torch.Tensor:
         """Run the backbone; the last hidden state in the head's dtype, standardised if the model is set to."""
-        out = self.encoder(**kw)
+        return self._head_view(self.encoder(**kw))
+
+    def _head_view(self, out) -> torch.Tensor:
+        """A backbone output as the head sees it: the last hidden state in the head's dtype, standardised if set."""
         hidden = out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
         hidden = hidden.to(self.proj.weight.dtype)  # the backbone may run in bf16; the head stays fp32
         if self.state_norm_mode == "standardize":
@@ -283,8 +293,7 @@ class AmortizedDecisionModel(nn.Module):
         s_ids = self._state_ids(states)
         if self.packed_impl == "replicate":
             if self.readout_mode == "pointer":
-                raise NotImplementedError("the pointer readout on a hybrid backbone (Qwen3.5) needs cache forks, "
-                                          "which coxlm does not implement yet")
+                return self._forked_pointer_slots(s_ids, q_ids, schema)
             return self._replicated_slots(s_ids, q_ids)
 
         batch = len(states)
@@ -379,6 +388,90 @@ class AmortizedDecisionModel(nn.Module):
         hidden = self._backbone_hidden(input_ids=ids, attention_mask=attn, position_ids=pos)
         out = torch.stack([hidden[j, len(r) - 1] for j, r in enumerate(rows)])
         return out.view(len(s_ids), len(q_ids), -1)
+
+    def _forked_pointer_slots(self, s_ids: list[list[int]], q_ids: list[list[int]], schema: Schema) -> torch.Tensor:
+        """Pointer readout on a hybrid backbone by cache forks (see the module docstring). Sets self._pointer_opts
+        (per field: (B, k, d) option vectors, or None for a slot-scored yes/no field) and returns the slots (B, F, d).
+
+        The states are left-padded into one batch and run once with the cache on. Every branch row continues from its
+        own state's cache: rows are processed in chunks of at most COXLM_FORK_TOKENS tokens (default 16384), each
+        chunk forked afresh from the states' cache, so memory stays bounded however many options a question has."""
+        if self.pool != "last":
+            raise NotImplementedError("cache forks need a causal backbone")
+        key = ("questions", schema, self.readout_mode, self.pointer_yesno)
+        starts_all, ends_all = self._cache[("starts",) + key], self._cache[("ends",) + key]
+        pad = getattr(self.tokenizer, "pad_token_id", None) or 0
+        dev = self.device
+        nb, S = len(s_ids), max(len(st) for st in s_ids)
+        sid = torch.full((nb, S), pad, dtype=torch.long)
+        smask = torch.zeros((nb, S), dtype=torch.long)
+        spos = torch.zeros((nb, S), dtype=torch.long)
+        for b, st in enumerate(s_ids):
+            lp = S - len(st)
+            sid[b, lp:] = torch.tensor(st)
+            smask[b, lp:] = 1
+            spos[b, lp:] = torch.arange(len(st))
+        sid, smask, spos = sid.to(dev), smask.to(dev), spos.to(dev)
+        base = self.encoder(input_ids=sid, attention_mask=smask, position_ids=spos, use_cache=True).past_key_values
+
+        rows, owner, plan = [], [], []
+        for q, starts, ends in zip(q_ids, starts_all, ends_all):
+            if starts is None:  # a yes/no field in the slot layout: its whole block after the state
+                plan.append(("plain", len(rows), None))
+                for b in range(nb):
+                    rows.append(q)
+                    owner.append(b)
+                continue
+            head, tail = q[: starts[0]], q[ends[-1] + 1:]
+            lines = [q[a: e + 1] for a, e in zip(starts, ends)]
+            plan.append(("pointer", len(rows), len(lines)))
+            for b in range(nb):
+                for r in [head + tail] + [head + line for line in lines]:
+                    rows.append(r)
+                    owner.append(b)
+
+        budget = int(os.environ.get("COXLM_FORK_TOKENS", "16384"))
+        per = max(1, budget // max(len(r) for r in rows))
+        outs = []
+        for i in range(0, len(rows), per):
+            chunk = rows[i: i + per]
+            own = torch.tensor(owner[i: i + per], dtype=torch.long, device=dev)
+            cache = copy.copy(base) if i + per < len(rows) else base  # the last chunk may consume the base cache
+            if cache is not base:
+                cache.layers = [copy.copy(layer) for layer in base.layers]
+                for layer in cache.layers:  # fresh containers: forking replaces tensors, never edits the base's
+                    for a in ("conv_states", "recurrent_states", "is_conv_states_initialized",
+                              "is_recurrent_states_initialized", "has_previous_state"):
+                        v = getattr(layer, a, None)
+                        if isinstance(v, (dict, list)):
+                            setattr(layer, a, type(v)(v))
+            cache.reorder_cache(own)
+            n, L = len(chunk), max(len(r) for r in chunk)
+            ids = torch.full((n, L), pad, dtype=torch.long)
+            m = torch.zeros((n, L), dtype=torch.long)
+            pos = torch.zeros((n, L), dtype=torch.long)
+            for j, (r, b) in enumerate(zip(chunk, owner[i: i + per])):
+                ids[j, : len(r)] = torch.tensor(r)
+                m[j, : len(r)] = 1
+                pos[j] = len(s_ids[b]) + torch.arange(L)  # branches start where their state ends
+            ids, m, pos = ids.to(dev), m.to(dev), pos.to(dev)
+            out = self.encoder(input_ids=ids, attention_mask=torch.cat([smask[own], m], dim=1), position_ids=pos,
+                               past_key_values=cache, use_cache=True)
+            h = self._head_view(out)
+            outs.append(h[torch.arange(n, device=dev), torch.tensor([len(r) for r in chunk], device=dev) - 1])
+        last = torch.cat(outs)
+
+        slots, opts = [], []
+        for kind, start, k in plan:
+            if kind == "plain":
+                slots.append(last[start: start + nb])
+                opts.append(None)
+            else:
+                blk = last[start: start + nb * (k + 1)].view(nb, k + 1, -1)
+                slots.append(blk[:, 0])
+                opts.append(blk[:, 1:])
+        self._pointer_opts = opts
+        return torch.stack(slots, dim=1)
 
     # -- forward -------------------------------------------------------------
 
