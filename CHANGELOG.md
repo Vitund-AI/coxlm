@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 (unreleased)
+
+- `load()` picks the Apple GPU (MPS) on Apple silicon when there is no CUDA GPU, and uses float32 on an Apple-silicon
+  CPU, where PyTorch has no fast bfloat16 maths (2.3x faster per answer there). Same answers as on CUDA.
+- README: what to expect on Macs (Apple silicon via MPS, Intel Macs through a server).
+
 ## 0.4.1 (unreleased)
 
 - No more false warning that yes/no questions without descriptions are unreadable: cox-1 exports declare that

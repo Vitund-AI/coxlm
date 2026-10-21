@@ -41,6 +41,11 @@ they need, has no official Windows build), so coxlm falls back to slower PyTorch
 full speed on Windows, use WSL2. The very first answer after installing takes longer (about 25 s on an RTX 4080
 SUPER) while the fast kernels compile for your GPU; they are cached, so later runs start straight away.
 
+On a Mac with Apple silicon (M1 or later), `coxlm.load()` uses the Apple GPU automatically (PyTorch's MPS
+backend). It gives the same answers, but without the fast kernels a short request takes a few seconds; we're working
+on a native MLX backend for Macs. Intel Macs can't run the model locally (PyTorch no longer supports them), but they
+can use `coxlm.connect()` with a server running elsewhere.
+
 `examples/demo.py` is a first run with the load time and the per-answer time shown separately.
 
 ## Quickstart

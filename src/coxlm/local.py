@@ -45,10 +45,10 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
     kwargs.setdefault("state_norm", "standardize")
     # bf16 unless asked otherwise, whatever the checkpoint recorded: models are trained (and every published number
     # measured) with a bf16 backbone, and full-weight checkpoints saved in fp32 would otherwise load at twice the memory
-    kwargs["dtype"] = dtype or "bf16"
     lora_r = checkpoint_lora_r(state)
-    dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    if str(dev).startswith("cpu"):  # the hub causal-conv1d kernel is CUDA-only
+    dev = device or _default_device()
+    kwargs["dtype"] = dtype or _default_dtype(dev)
+    if not str(dev).startswith("cuda"):  # the hub causal-conv1d kernel is CUDA-only (CPU, Apple MPS)
         os.environ.setdefault("COX_HUB_CONV1D", "0")
     # a full-weight checkpoint (every backbone weight present, no LoRA) needs only the backbone's configuration:
     # downloading and initialising the pretrained weights would be wasted, since all of them are overwritten
@@ -88,11 +88,11 @@ def _load_export(path: str, source: str, device: str | None = None, dtype: str |
     build = dict((cfg.get("meta") or {}).get("build") or {})
     build.update({"read_layer": None, "truncate": False})  # the folder holds exactly the read blocks
     check_supported(build)
-    dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    if str(dev).startswith("cpu"):  # the hub causal-conv1d kernel is CUDA-only
+    dev = device or _default_device()
+    if not str(dev).startswith("cuda"):  # the hub causal-conv1d kernel is CUDA-only (CPU, Apple MPS)
         os.environ.setdefault("COX_HUB_CONV1D", "0")
     model = build_model(path, lora_r=0, pretrained_weights=True, state_norm=build.get("state_norm") or "standardize",
-                        dtype=dtype or "bf16")
+                        dtype=dtype or _default_dtype(dev))
     if cfg.get("final_norm") == "identity":
         text = next((m for m in model.encoder.modules()
                      if isinstance(m._modules.get("layers"), nn.ModuleList) and "norm" in m._modules), None)
@@ -112,6 +112,26 @@ def _load_export(path: str, source: str, device: str | None = None, dtype: str |
     model.checkpoint_path = source
     return _maybe_compile(model)
 
+
+
+
+def _default_dtype(dev: str) -> str:
+    """bf16 (the precision models are trained in), except on an Apple-silicon CPU, where PyTorch has no fast bf16
+    maths: fp32 there was 2.3x faster per answer (11 s against 25 s on a MacBook) at twice the memory (~12 GB)."""
+    import platform
+    if str(dev).startswith("cpu") and platform.system() == "Darwin" and platform.machine() in ("arm64", "aarch64"):
+        return "fp32"
+    return "bf16"
+
+def _default_device() -> str:
+    """CUDA when available, else the Apple GPU (MPS) on Apple silicon, else the CPU."""
+    import torch
+    if torch.cuda.is_available():
+        return "cuda"
+    mps = getattr(torch.backends, "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps"
+    return "cpu"
 
 def _cpu_notice(model):
     """A one-time hint when no GPU is in use: the model works on the CPU, but each answer takes seconds."""
