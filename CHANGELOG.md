@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 (unreleased)
+
+- No more false warning that yes/no questions without descriptions are unreadable: cox-1 exports declare that
+  the model reads a question's wording.
+- A one-time notice when the model runs on the CPU, with the reason (no CUDA build of PyTorch, or no GPU).
+- The `fast` extra also installs flash-linear-attention (it only installed `kernels`, so the linear-attention
+  layers fell back to slow PyTorch code unless flash-linear-attention was installed separately).
+- README: requirements and speed (GPU, CPU, Windows); `examples/demo.py` with load and per-answer timing.
+
 ## 0.4.0 (unreleased)
 
 - Loads cox-1 model exports (the format of `Vitund/cox-1-3b`): a Hugging Face text-model folder plus

@@ -42,8 +42,9 @@ local = [
 ]
 # coxlm-serve (the server itself is standard library; it needs the model)
 serve = ["coxlm[local]"]
-# optional: Hugging Face hub kernels (fused causal-conv1d for Qwen3.5 backbones)
-fast = ["kernels"]
+# optional, Linux: the fast kernels for Qwen3.5 backbones (fused causal-conv1d from the Hugging Face hub, and
+# flash-linear-attention's gated delta rule); without them the same answers come from slower PyTorch code
+fast = ["kernels", "flash-linear-attention"]
 test = ["pytest"]
 
 [project.urls]

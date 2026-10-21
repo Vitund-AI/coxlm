@@ -100,7 +100,10 @@ def _load_export(path: str, source: str, device: str | None = None, dtype: str |
             raise RuntimeError(f"{path}: could not find the backbone's final norm")
         text.norm = nn.Identity()
     state = dict(load_file(os.path.join(path, "cox_head.safetensors")))
-    state[META_KEY] = {"encoder": cfg.get("base_model"), "build": build, "features": (cfg.get("meta") or {}).get("features") or []}
+    features = list((cfg.get("meta") or {}).get("features") or [])
+    if (cfg.get("capabilities") or {}).get("reads_instructions") and "channel_ablation" not in features:
+        features.append("channel_ablation")  # the model reads a question's wording (no bare yes/no warning)
+    state[META_KEY] = {"encoder": cfg.get("base_model"), "build": build, "features": features}
     model = model.to(dev)
     load_state(model, state)
     model.eval()
@@ -110,10 +113,23 @@ def _load_export(path: str, source: str, device: str | None = None, dtype: str |
     return _maybe_compile(model)
 
 
+def _cpu_notice(model):
+    """A one-time hint when no GPU is in use: the model works on the CPU, but each answer takes seconds."""
+    if not str(getattr(model, "device", "cpu")).startswith("cpu"):
+        return
+    import sys
+    import torch
+    why = ("this PyTorch build has no CUDA support" if not torch.backends.cuda.is_built()
+           else "no CUDA GPU was found")
+    print(f"coxlm: running on the CPU ({why}): expect a few seconds per answer. For GPU speed, install a CUDA build "
+          "of PyTorch (https://pytorch.org/get-started/locally/).", file=sys.stderr, flush=True)
+
+
 def _maybe_compile(model):
     """COXLM_COMPILE=1: compile each backbone block with torch.compile (dynamic shapes). Fuses the many small kernels of
     a block: about 15% faster on long texts on an RTX 4090 (6k tokens 353 -> 299 ms), no change on short requests, same
     answers within bf16 noise; costs ~40 s of compiling over the first requests. Off by default."""
+    _cpu_notice(model)
     if os.environ.get("COXLM_COMPILE", "0") != "1" or not str(getattr(model, "device", "cpu")).startswith("cuda"):
         return model
     import torch

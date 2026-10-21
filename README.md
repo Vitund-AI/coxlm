@@ -21,11 +21,27 @@ From git:
 ```bash
 pip install "git+https://github.com/Vitund-AI/coxlm.git"                 # the client: no torch, no GPU needed
 pip install "coxlm[local] @ git+https://github.com/Vitund-AI/coxlm.git"  # also run checkpoints locally (torch, transformers, peft)
+pip install "coxlm[local,fast] @ git+https://github.com/Vitund-AI/coxlm.git"  # Linux / WSL2: plus the fast kernels
 pip install "coxlm[serve] @ git+https://github.com/Vitund-AI/coxlm.git"  # also run the coxlm-serve server
 ```
 
 Python 3.10 or newer. The base install uses only the standard library. Importing
 `coxlm` does not import torch.
+
+## Requirements and speed
+
+A CUDA GPU is recommended: cox-1-3b needs about 6 GB of GPU memory and answers a short request with a few
+questions in a few tens of milliseconds. Without a GPU it still works on the CPU, at a few seconds per answer
+(about 3 s for a short request with three questions). If coxlm reports that it is running on the CPU although you
+have an NVIDIA GPU, your PyTorch build has no CUDA support: install a CUDA build from
+[pytorch.org](https://pytorch.org/get-started/locally/).
+
+On Linux (and WSL2), install the `fast` extra (`coxlm[local,fast]`) for the fast linear-attention kernels. On native Windows the kernels usually don't load (Triton, which
+they need, has no official Windows build), so coxlm falls back to slower PyTorch code with the same answers; for
+full speed on Windows, use WSL2. The very first answer after installing takes longer (about 25 s on an RTX 4080
+SUPER) while the fast kernels compile for your GPU; they are cached, so later runs start straight away.
+
+`examples/demo.py` is a first run with the load time and the per-answer time shown separately.
 
 ## Quickstart
 
