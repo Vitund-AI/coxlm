@@ -29,7 +29,7 @@ from .decide import Answer, Answers, AnswerSet, Questions, render_state
 from .order import order_items
 from .schema import Field, Schema, choice, multilabel, multiscore, numeric_field, questions, score, yesno
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 
 def load(path, encoder: str | None = None, device: str | None = None, dtype: str | None = None,
@@ -40,9 +40,15 @@ def load(path, encoder: str | None = None, device: str | None = None, dtype: str
     ``connect()``. ``backend``: "torch" (``pip install "coxlm[local]"``; CUDA, Apple MPS or CPU) or "mlx"
     (``pip install "coxlm[mlx]"``; Apple silicon, model exports such as Vitund/cox-1-3b, no torch). The default
     (or the ``COXLM_BACKEND`` environment variable) is MLX on Apple silicon when mlx is installed and the checkpoint
-    is a model export, else torch. ``quantize`` (MLX only): 4 or 8 bits for the backbone's linear layers.
+    is a model export, else torch; passing ``encoder=`` or ``device=`` without a backend picks torch. ``quantize`` (MLX only): 4 or 8 bits for the backbone's linear layers.
     """
-    backend = backend or os.environ.get("COXLM_BACKEND") or _default_backend(path, revision)
+    explicit = backend or os.environ.get("COXLM_BACKEND")
+    if explicit:
+        backend = explicit
+    elif encoder is not None or device is not None:
+        backend = "torch"  # encoder= / device= are PyTorch options: asking for them picks PyTorch
+    else:
+        backend = _default_backend(path, revision)
     if backend == "mlx":
         from .mlx_backend import load as _load_mlx, mlx_available
         if not mlx_available():

@@ -29,6 +29,7 @@ print("loading Vitund/cox-1-3b (the first run downloads about 5.8 GB)...", flush
 t0 = time.perf_counter()
 model = coxlm.load("Vitund/cox-1-3b")
 print(f"load (download or cache, weights to the device): {time.perf_counter() - t0:.1f} s")
+print("backend:", "MLX (Apple silicon)" if type(model).__module__.endswith("mlx_backend") else "PyTorch")
 
 print("first answer...", flush=True)
 t0 = time.perf_counter()

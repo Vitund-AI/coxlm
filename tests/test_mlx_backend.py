@@ -222,3 +222,13 @@ def test_quantized_loads(tiny_export):
     q = coxlm.load(tiny_export, backend="mlx", dtype="fp32", quantize=8)
     schema = _schema()
     assert _max_diff(_probs(m, STATES[:2], schema), _probs(q, STATES[:2], schema)) < 0.05
+
+
+def test_device_without_backend_picks_torch(tiny_export, monkeypatch):
+    """encoder= / device= are PyTorch options: passing one without a backend loads PyTorch, even where MLX is the
+    default (a demo edited to pass device="mps" on a Mac used to fail instead)."""
+    import coxlm
+    monkeypatch.delenv("COXLM_BACKEND", raising=False)
+    monkeypatch.setattr(coxlm, "_default_backend", lambda path, revision: "mlx")
+    m = coxlm.load(tiny_export, device="cpu", dtype="fp32")
+    assert not type(m).__module__.endswith("mlx_backend")
