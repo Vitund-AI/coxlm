@@ -45,6 +45,15 @@ serve = ["coxlm[local]"]
 # optional, Linux: the fast kernels for Qwen3.5 backbones (fused causal-conv1d from the Hugging Face hub, and
 # flash-linear-attention's gated delta rule); without them the same answers come from slower PyTorch code
 fast = ["kernels", "flash-linear-attention"]
+# Apple silicon: the native MLX backend, coxlm.load(..., backend="mlx") (no torch). On Linux, mlx needs its CPU
+# build for development and tests: pip install "mlx[cpu]"
+mlx = [
+    "mlx>=0.29",
+    "mlx-lm>=0.31.3",      # its Qwen3.5 text model and gated-delta kernels
+    "transformers>=5.17",  # the tokenizer only
+    "safetensors",
+    "huggingface_hub",
+]
 test = ["pytest"]
 
 [project.urls]

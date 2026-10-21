@@ -13,10 +13,10 @@ backbone weight, no LoRA tensors). ``checkpoint_lora_r`` tells them apart.
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
-import torch
-
-from .model import AmortizedDecisionModel
+if TYPE_CHECKING:  # torch is imported where it is used: the MLX backend reads exports through this module
+    from .model import AmortizedDecisionModel
 
 META_KEY = "__cox_meta__"
 
@@ -53,6 +53,8 @@ def read_checkpoint(path: str | os.PathLike) -> dict:
     """The checkpoint's state dict, with its metadata under META_KEY. Reads a torch model.pt (memory-mapped where
     possible, so a large checkpoint is never held in RAM twice), or a release folder / .safetensors file with its
     config.json beside it (the Hugging Face release format, written by the research repo's hf_release.py)."""
+    import torch
+
     path = os.fspath(path)
     if os.path.isdir(path) or path.endswith(".safetensors"):
         return _read_release(path)
@@ -201,7 +203,7 @@ def check_supported(build: dict) -> None:
         raise ValueError("this checkpoint uses build settings coxlm does not support: " + ", ".join(bad))
 
 
-def load_state(model: AmortizedDecisionModel, path: str | dict) -> AmortizedDecisionModel:
+def load_state(model: "AmortizedDecisionModel", path: str | dict) -> "AmortizedDecisionModel":
     """Load a checkpoint (a path, or a state dict already read with ``read_checkpoint``) into ``model``,
     applying the build settings recorded in its metadata. ``COX_QUANT`` = fp8 / fp4w / fp4 simulates
     quantized inference after the weights are in (accuracy only; no speed-up)."""

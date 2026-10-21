@@ -23,6 +23,7 @@ pip install "git+https://github.com/Vitund-AI/coxlm.git"                 # the c
 pip install "coxlm[local] @ git+https://github.com/Vitund-AI/coxlm.git"  # also run checkpoints locally (torch, transformers, peft)
 pip install "coxlm[local,fast] @ git+https://github.com/Vitund-AI/coxlm.git"  # Linux / WSL2: plus the fast kernels
 pip install "coxlm[serve] @ git+https://github.com/Vitund-AI/coxlm.git"  # also run the coxlm-serve server
+pip install "coxlm[mlx] @ git+https://github.com/Vitund-AI/coxlm.git"    # Apple silicon: the native MLX backend (no torch)
 ```
 
 Python 3.10 or newer. The base install uses only the standard library. Importing
@@ -41,10 +42,18 @@ they need, has no official Windows build), so coxlm falls back to slower PyTorch
 full speed on Windows, use WSL2. The very first answer after installing takes longer (about 25 s on an RTX 4080
 SUPER) while the fast kernels compile for your GPU; they are cached, so later runs start straight away.
 
-On a Mac with Apple silicon (M1 or later), `coxlm.load()` uses the Apple GPU automatically (PyTorch's MPS
-backend). It gives the same answers, but without the fast kernels a short request takes a few seconds; we're working
-on a native MLX backend for Macs. Intel Macs can't run the model locally (PyTorch no longer supports them), but they
-can use `coxlm.connect()` with a server running elsewhere.
+On a Mac with Apple silicon (M1 or later), install the `mlx` extra (`coxlm[mlx]`): `coxlm.load()` then runs model
+exports such as `Vitund/cox-1-3b` on MLX, Apple's own array framework, whose Metal kernels cover the model's
+linear-attention layers. It needs no PyTorch and gives the same answers as the PyTorch backend (within bf16
+rounding), several times faster: on an Apple-silicon MacBook a short request with a few questions takes about 0.4 s
+and a long text about 2 s, against about 4 s and 10 s with PyTorch on the Apple GPU. The MLX backend is new: please
+report problems. `coxlm.load(..., quantize=4)` quantizes the backbone's linear layers to 4 bits (about 3 GB instead
+of 6), but in our first tests it was no faster than bf16 and changed some answers, so treat it as experimental and
+use the default bf16 for real work. Without the `mlx` extra (`coxlm[local]` only), `coxlm.load()` uses PyTorch on
+the Apple GPU (MPS), which gives the same answers more slowly; `backend="torch"` or `backend="mlx"` picks one
+explicitly.
+Intel Macs can't run the model locally (neither PyTorch nor MLX supports them), but they can use `coxlm.connect()`
+with a server running elsewhere.
 
 `examples/demo.py` is a first run with the load time and the per-answer time shown separately.
 
@@ -288,6 +297,9 @@ takes an optional `values` list. A yes/no question takes optional
 The server has no authentication. Run it on a trusted network.
 
 ## Environment variables
+
+- `COXLM_BACKEND=torch|mlx` picks the backend `coxlm.load()` uses when none is passed (default: MLX on Apple
+  silicon when the `mlx` extra is installed and the model is an export, PyTorch everywhere else).
 
 - `COX_QUANT=fp8|fp4w|fp4` simulates FP8 or NVFP4 quantized inference after
   loading. It measures the accuracy cost only and does not make inference faster.

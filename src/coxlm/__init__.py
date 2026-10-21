@@ -22,27 +22,59 @@ Importing coxlm does not import torch; only ``load`` does.
 """
 from __future__ import annotations
 
+import os
+
 from .client import CoxlmError, RemoteModel, connect
 from .decide import Answer, Answers, AnswerSet, Questions, render_state
 from .order import order_items
 from .schema import Field, Schema, choice, multilabel, multiscore, numeric_field, questions, score, yesno
 
-__version__ = "0.4.2"
+__version__ = "0.5.0"
 
 
 def load(path, encoder: str | None = None, device: str | None = None, dtype: str | None = None,
-         max_length: int = 2048, revision: str | None = None):
-    """Load a checkpoint for local GPU inference (needs ``pip install "coxlm[local]"``).
+         max_length: int = 2048, revision: str | None = None, backend: str | None = None, quantize: int | None = None):
+    """Load a checkpoint for local inference.
 
     Returns a model with the same ``decide(state, questions)`` / ``decide_batch(states, questions)`` contract as
-    ``connect()``.
+    ``connect()``. ``backend``: "torch" (``pip install "coxlm[local]"``; CUDA, Apple MPS or CPU) or "mlx"
+    (``pip install "coxlm[mlx]"``; Apple silicon, model exports such as Vitund/cox-1-3b, no torch). The default
+    (or the ``COXLM_BACKEND`` environment variable) is MLX on Apple silicon when mlx is installed and the checkpoint
+    is a model export, else torch. ``quantize`` (MLX only): 4 or 8 bits for the backbone's linear layers.
     """
+    backend = backend or os.environ.get("COXLM_BACKEND") or _default_backend(path, revision)
+    if backend == "mlx":
+        from .mlx_backend import load as _load_mlx, mlx_available
+        if not mlx_available():
+            raise ImportError('the MLX backend needs the mlx extra on Apple silicon: pip install "coxlm[mlx]"')
+        if encoder is not None or device is not None:
+            raise ValueError("encoder= and device= are PyTorch options; the MLX backend reads the export folder")
+        return _load_mlx(path, max_length=max_length, revision=revision, quantize=quantize, dtype=dtype)
+    if backend != "torch":
+        raise ValueError(f"unknown backend {backend!r} (torch or mlx)")
+    if quantize:
+        raise ValueError("quantize= is an MLX option (backend='mlx')")
     try:
         from .local import load as _load
         import torch  # noqa: F401
     except ImportError as e:  # pragma: no cover - depends on the environment
         raise ImportError('coxlm.load needs the local extra: pip install "coxlm[local]"') from e
     return _load(path, encoder=encoder, device=device, dtype=dtype, max_length=max_length, revision=revision)
+
+
+def _default_backend(path, revision) -> str:
+    """MLX on Apple silicon when mlx is installed and `path` is a model export; torch everywhere else."""
+    import platform
+    if platform.system() != "Darwin" or platform.machine() not in ("arm64", "aarch64"):
+        return "torch"
+    from .mlx_backend import mlx_available
+    if not mlx_available():
+        return "torch"
+    from .checkpoint import is_export, resolve
+    try:
+        return "mlx" if is_export(resolve(path, revision=revision)) else "torch"
+    except (FileNotFoundError, ImportError):
+        return "torch"
 
 
 __all__ = [
