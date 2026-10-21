@@ -244,6 +244,51 @@ the precedences the model is confident about (`epsilon`, default 0.15) and retur
 When a set of steps has no single correct order, the graph and `levels` are the useful output, not `order`. Worked
 examples with real output: [vitund.ai/open-source/coxlm/examples](https://vitund.ai/open-source/coxlm/examples).
 
+## Fine-tune on your own data
+
+When the model gets your task mostly right but not right enough, `coxlm.finetune` adapts it to your labelled
+examples. It trains a small LoRA adapter (and, by default, the head's readout weights) on top of a model export and
+leaves the base model unchanged, so one base can serve several adapters. It needs the `local` extra and, in practice,
+a CUDA GPU.
+
+```python
+import coxlm
+
+examples = [
+    ("My card was charged twice!!", {"team": "billing", "refund": "yes"}),
+    ("The app crashes when I open settings.", {"team": "support", "refund": "no"}),
+    # ... a few hundred or more
+]
+path, report = coxlm.finetune("Vitund/cox-1-3b", examples, Ticket, "ticket-adapter")
+
+model = coxlm.load("Vitund/cox-1-3b", adapter="ticket-adapter")
+model.decide("I was billed for a plan I cancelled.", Ticket)
+```
+
+An answer can be the correct option, or a probability per option (`{"billing": 0.7, "support": 0.3}`) when the
+label itself is uncertain. Examples can also come from a JSONL file with one `{"state": ..., "truth": {...}}` row
+per line (`"targets"` for probabilities, and an optional per-row `"schema"`). Labels for some questions may be
+missing; those questions are left out of that example's loss.
+
+Before training, a share of the examples (`holdout`, 15% by default, stratified on the labels) is set aside. After
+training, coxlm fits one temperature on that held-out part, a single number that makes the probabilities match how
+often the model is actually right there, and stores it in the adapter, where `load` applies it. It then prints a
+report, also saved as `report.json`, comparing the base model and the adapted one on the held-out part: accuracy;
+skill over always answering the most common label (0 means no better than that, 1 means always right); calibration
+error (ECE); and the share of decisions you could hand to the model at 95% accuracy, taking its most confident
+answers first. It also asks both models a small built-in set of general questions and warns if the adapted model
+got worse at them, which is a sign it changed more than your task.
+
+What to expect: the report tells you whether the adapter helped, on examples it was not trained on. Aim for a few
+hundred clear examples per question or more; with a few dozen, the held-out numbers are too rough to trust, and
+coxlm says so. A fine-tune teaches the model your labels; it cannot fix labels that are inconsistent, and it does not make the
+model better at tasks you did not train on. Keep the questions' wording the same at inference as in training.
+
+The main settings are `steps` (by default about two passes over your examples), `lr` (1e-4), `batch_size` (8),
+`lora_r` (8) and `train_head`. `load(..., merge=True)` folds the adapter into the base weights for slightly faster
+answers. An adapter records the exact base it was trained on, and `load` refuses it on any other base. Adapters run
+on the PyTorch backend; MLX support comes later. [examples/doom](examples/doom) fine-tunes the model to play Doom.
+
 ## Running a server
 
 ```bash

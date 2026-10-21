@@ -57,3 +57,13 @@ def server(fake_model):
     yield f"http://127.0.0.1:{httpd.server_address[1]}", fake_model
     httpd.shutdown()
     httpd.server_close()
+
+
+@pytest.fixture(scope="session")
+def tiny_export(tmp_path_factory):
+    """A tiny random cox-1-style model export (tests/tiny_export.py); needs torch and transformers."""
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    from tiny_export import make_tiny_export
+
+    return make_tiny_export(str(tmp_path_factory.mktemp("tiny_export")))

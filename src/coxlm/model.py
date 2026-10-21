@@ -23,7 +23,8 @@ branch per option), the <answer> vector from the head and the block's closing ta
 separate branches' recurrent states cannot be merged), and a yes/no question scored by the slot readout from the
 state with its whole block. This is the layout the research models were trained with.
 
-coxlm ships this module for inference only.
+coxlm ships this module for inference; ``full_rows`` gives coxlm.finetune a differentiable path through the same
+layout (each pointer row read as one plain pass, which the inference path also takes for short requests).
 """
 from __future__ import annotations
 
@@ -96,6 +97,11 @@ class AmortizedDecisionModel(nn.Module, PromptLayout):
         for p in self.encoder.parameters():
             p.requires_grad_(False)
         self._cache: dict = {}
+        # a fine-tune adapter's re-fitted temperature: predict() divides every field's logits by it (1.0 = none)
+        self.logit_temperature = 1.0
+        # training (coxlm.finetune): every pointer row is read as one plain pass [state + row], with no cache forks,
+        # and option encodings are recomputed with gradients instead of cached (same tokens, same answers)
+        self.full_rows = False
 
     @property
     def device(self) -> torch.device:
@@ -165,7 +171,8 @@ class AmortizedDecisionModel(nn.Module, PromptLayout):
         enc = self.tokenizer(list(texts), padding=True, truncation=True, max_length=self.max_length, return_tensors="pt")
         input_ids = enc["input_ids"].to(self.device)
         attn = enc["attention_mask"].to(self.device)
-        return self._backbone_hidden(input_ids=input_ids, attention_mask=attn), attn
+        return self._backbone_hidden(input_ids=input_ids, attention_mask=attn,
+                                     **({"use_cache": False} if self.full_rows else {})), attn
 
     @staticmethod
     def _mean_pool(hidden: torch.Tensor, attn: torch.Tensor) -> torch.Tensor:
@@ -187,6 +194,8 @@ class AmortizedDecisionModel(nn.Module, PromptLayout):
         """Each field's options, each encoded on its own: [(k_f, d)] per field, cached per schema."""
         # keyed on the schema's content (it is frozen and hashable), not its object id: ids are recycled after
         # garbage collection, and a stale hit returns another schema's embeddings
+        if self.full_rows:  # training: fresh, differentiable, never cached (the weights are changing)
+            return [self._pool(*self._encode_texts(self._option_texts(f))) for f in schema]
         if len(self._cache) > 512:
             self._cache.clear()
         key = ("options", schema)
@@ -342,7 +351,7 @@ class AmortizedDecisionModel(nn.Module, PromptLayout):
             return base_box[0]
 
         budget = int(os.environ.get("COXLM_FORK_TOKENS", "16384"))
-        nested_min = int(os.environ.get("COXLM_NESTED_OPTIONS", "8"))
+        nested_min = int(os.environ.get("COXLM_NESTED_OPTIONS", "8")) if not self.full_rows else 1 << 30
 
         def fork(cache, own):
             """A copy of `cache` whose rows are cache rows `own` (the original is left untouched)."""
@@ -423,8 +432,8 @@ class AmortizedDecisionModel(nn.Module, PromptLayout):
         # reads all the weights (~6 ms on an RTX 4090 for a 3B model), so for short states with few rows recomputing
         # the state per row costs less than a separate state pass (a short yes/no: ~23 -> ~13 ms). Same answers: the
         # backbone is causal, so a row sees exactly what it sees after a fork.
-        single = bool(rows) and not any(kind == "nested" for kind, _, _ in plan) and \
-            sum(state_pos[b] for b in owner) - sum(state_pos) <= int(os.environ.get("COXLM_PASS_COST_TOKENS", "256"))
+        single = bool(rows) and not any(kind == "nested" for kind, _, _ in plan) and (self.full_rows or \
+            sum(state_pos[b] for b in owner) - sum(state_pos) <= int(os.environ.get("COXLM_PASS_COST_TOKENS", "256")))
         if single:
             seqs = [s_ids[b] + r for b, r in zip(owner, rows)]
             n, L = len(seqs), max(len(q) for q in seqs)
@@ -434,7 +443,8 @@ class AmortizedDecisionModel(nn.Module, PromptLayout):
                 ids[j, : len(q)] = torch.tensor(q)
                 msk[j, : len(q)] = 1
             pos = torch.arange(L).unsqueeze(0).expand(n, L)
-            out = self.encoder(input_ids=ids.to(dev), attention_mask=msk.to(dev), position_ids=pos.to(dev))
+            out = self.encoder(input_ids=ids.to(dev), attention_mask=msk.to(dev), position_ids=pos.to(dev),
+                               **({"use_cache": False} if self.full_rows else {}))
             h = self._head_view(out)
             last = h[torch.arange(n, device=dev), torch.tensor([len(q) for q in seqs], device=dev) - 1]
         else:
@@ -503,7 +513,8 @@ class AmortizedDecisionModel(nn.Module, PromptLayout):
         """States -> list of {field_name: [probabilities]} per example."""
         was_training = self.training
         self.eval()
-        probs = [F.softmax(l, dim=-1) for l in self.forward(states, schema)]
+        t = float(getattr(self, "logit_temperature", 1.0) or 1.0)
+        probs = [F.softmax(l.float() / t, dim=-1) for l in self.forward(states, schema)]
         if was_training:
             self.train()
         return [{schema.fields[i].name: probs[i][b].cpu().tolist() for i in range(len(schema))} for b in range(len(states))]
@@ -526,6 +537,36 @@ def _enable_hub_conv1d() -> None:
     shims = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shims")
     if os.environ.get("COX_HUB_CONV1D", "1") != "0" and importlib.util.find_spec("kernels") and shims not in sys.path:
         sys.path.insert(0, shims)
+
+
+def _reference_linear_attention_off_cuda() -> None:
+    """Route Qwen3.5's gated-delta-rule calls on CPU / Apple MPS tensors to transformers' PyTorch reference.
+    transformers picks flash-linear-attention's Triton kernels whenever that package is installed, and those kernels
+    take CUDA tensors only: without this, a CPU model fails (or Triton reaches for a GPU) wherever the fast extra is
+    installed. CUDA tensors still go to the fast kernels."""
+    import inspect
+
+    try:
+        from transformers.models.qwen3_5 import modeling_qwen3_5 as m
+    except ImportError:  # pragma: no cover - older transformers
+        return
+    for name in ("torch_chunk_gated_delta_rule", "torch_recurrent_gated_delta_rule"):
+        fn = getattr(m, name, None)
+        if fn is None or getattr(fn, "_coxlm_dispatch", False):
+            continue
+        ref = inspect.unwrap(fn)
+        if ref is fn:
+            continue
+        params = set(inspect.signature(ref).parameters)
+
+        def dispatch(*args, _fast=fn, _ref=ref, _params=params, **kwargs):
+            q = args[0] if args else kwargs.get("query")
+            if q is not None and q.is_cuda:
+                return _fast(*args, **kwargs)
+            return _ref(*args, **{k: v for k, v in kwargs.items() if k in _params})
+
+        dispatch._coxlm_dispatch = True
+        setattr(m, name, dispatch)
 
 
 def _no_init_weights():
@@ -575,6 +616,7 @@ def build_model(
     load_kw = {"dtype": torch_dtype} if torch_dtype else {}
     if config.model_type in HYBRID_MODEL_TYPES and config.model_type not in MAMBA_MODEL_TYPES:
         _enable_hub_conv1d()
+        _reference_linear_attention_off_cuda()
     if config.model_type in MAMBA_MODEL_TYPES:
         try:  # prebuilt Hub kernels (kernels-community/mamba-ssm): the reference Mamba scan is too slow / memory-hungry
             import kernels  # noqa: F401
