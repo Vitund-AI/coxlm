@@ -23,11 +23,14 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
     """
     import torch
 
-    from .checkpoint import check_supported, checkpoint_lora_r, checkpoint_meta, load_state, read_checkpoint, resolve
+    from .checkpoint import (check_supported, checkpoint_lora_r, checkpoint_meta, is_export, load_state, read_checkpoint,
+                             resolve)
     from .model import build_model
 
     source = str(path)
     path = resolve(path, revision=revision)
+    if is_export(path):
+        return _load_export(path, source, device=device, dtype=dtype, max_length=max_length)
     state = read_checkpoint(path)
     meta = checkpoint_meta(state)
     encoder = encoder or meta.get("encoder")
@@ -63,4 +66,66 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
     model.max_length = max_length
     model.encoder_name = encoder
     model.checkpoint_path = source
+    return _maybe_compile(model)
+
+
+def _load_export(path: str, source: str, device: str | None = None, dtype: str | None = None, max_length: int = 2048):
+    """Load a model export (see checkpoint.is_export): the backbone is the folder itself (only the blocks the head
+    reads, text only), its final norm replaced by an identity when cox_config.json says so (the head reads the
+    residual stream before that norm), then the head and its build settings."""
+    import json
+
+    import torch
+    from safetensors.torch import load_file
+    from torch import nn
+
+    from .checkpoint import META_KEY, check_supported, load_state
+    from .model import build_model
+
+    cfg = json.load(open(os.path.join(path, "cox_config.json")))
+    if int(cfg.get("format_version", 0)) != 1:
+        raise ValueError(f"{path}: export format {cfg.get('format_version')!r} is newer than this coxlm; upgrade coxlm")
+    build = dict((cfg.get("meta") or {}).get("build") or {})
+    build.update({"read_layer": None, "truncate": False})  # the folder holds exactly the read blocks
+    check_supported(build)
+    dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    if str(dev).startswith("cpu"):  # the hub causal-conv1d kernel is CUDA-only
+        os.environ.setdefault("COX_HUB_CONV1D", "0")
+    model = build_model(path, lora_r=0, pretrained_weights=True, state_norm=build.get("state_norm") or "standardize",
+                        dtype=dtype or "bf16")
+    if cfg.get("final_norm") == "identity":
+        text = next((m for m in model.encoder.modules()
+                     if isinstance(m._modules.get("layers"), nn.ModuleList) and "norm" in m._modules), None)
+        if text is None:
+            raise RuntimeError(f"{path}: could not find the backbone's final norm")
+        text.norm = nn.Identity()
+    state = dict(load_file(os.path.join(path, "cox_head.safetensors")))
+    state[META_KEY] = {"encoder": cfg.get("base_model"), "build": build, "features": (cfg.get("meta") or {}).get("features") or []}
+    model = model.to(dev)
+    load_state(model, state)
+    model.eval()
+    model.max_length = max_length
+    model.encoder_name = cfg.get("base_model")
+    model.checkpoint_path = source
+    return _maybe_compile(model)
+
+
+def _maybe_compile(model):
+    """COXLM_COMPILE=1: compile each backbone block with torch.compile (dynamic shapes). Fuses the many small kernels of
+    a block: about 15% faster on long texts on an RTX 4090 (6k tokens 353 -> 299 ms), no change on short requests, same
+    answers within bf16 noise; costs ~40 s of compiling over the first requests. Off by default."""
+    if os.environ.get("COXLM_COMPILE", "0") != "1" or not str(getattr(model, "device", "cpu")).startswith("cuda"):
+        return model
+    import torch
+    from torch import nn
+    import torch._dynamo as dynamo
+    for name in ("recompile_limit", "cache_size_limit"):  # many shapes per block (states, questions, options)
+        if hasattr(dynamo.config, name):
+            setattr(dynamo.config, name, max(getattr(dynamo.config, name), 64))
+    for m in model.encoder.modules():
+        layers = m._modules.get("layers")
+        if isinstance(layers, nn.ModuleList):
+            for i, layer in enumerate(layers):
+                layers[i] = torch.compile(layer, dynamic=True)
+            break
     return model

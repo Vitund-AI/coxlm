@@ -412,10 +412,76 @@ class AmortizedDecisionModel(nn.Module):
             smask[b, lp:] = 1
             spos[b, lp:] = torch.arange(len(st))
         sid, smask, spos = sid.to(dev), smask.to(dev), spos.to(dev)
-        base = self.encoder(input_ids=sid, attention_mask=smask, position_ids=spos, use_cache=True).past_key_values
+        base_box = []
 
+        def get_base():  # the states' cache, computed only when a forked pass needs it
+            if not base_box:
+                base_box.append(self.encoder(input_ids=sid, attention_mask=smask, position_ids=spos,
+                                             use_cache=True).past_key_values)
+            return base_box[0]
+
+        budget = int(os.environ.get("COXLM_FORK_TOKENS", "16384"))
+        nested_min = int(os.environ.get("COXLM_NESTED_OPTIONS", "8"))
+
+        def fork(cache, own):
+            """A copy of `cache` whose rows are cache rows `own` (the original is left untouched)."""
+            if hasattr(cache, "fork"):  # a cache that forks itself (plain-tensor caches)
+                return cache.fork(own)
+            c = copy.copy(cache)
+            c.layers = [copy.copy(layer) for layer in cache.layers]
+            for layer in c.layers:  # fresh containers: forking replaces tensors, never edits the original's
+                for a in ("conv_states", "recurrent_states", "is_conv_states_initialized",
+                          "is_recurrent_states_initialized", "has_previous_state"):
+                    v = getattr(layer, a, None)
+                    if isinstance(v, (dict, list)):
+                        setattr(layer, a, type(v)(v))
+            c.reorder_cache(own)
+            return c
+
+        def run_rows(cache, prior_mask, start_pos, rows, owner):
+            """Last hidden state of each row, every row continuing from cache row owner[j] (chunked by the budget).
+            prior_mask: (rows of cache, P) mask of what the cache holds; start_pos: per cache row, the first position."""
+            # rows sorted by length and, when it saves more padding than a pass costs, split into two length groups
+            # (option lines vary, e.g. 9 to 24 tokens: one padded batch was 27-40% padding)
+            order = sorted(range(len(rows)), key=lambda j: len(rows[j]))
+            lens = [len(rows[j]) for j in order]
+            groups, best = [order], len(lens) * lens[-1]
+            pass_cost = int(os.environ.get("COXLM_PASS_COST_TOKENS", "256"))  # what one more pass costs, in tokens
+            for cut in range(1, len(lens)):
+                cost = cut * lens[cut - 1] + (len(lens) - cut) * lens[-1] + pass_cost
+                if cost < best:
+                    groups, best = [order[:cut], order[cut:]], cost
+            chunks = []
+            for g in groups:
+                per = max(1, budget // max(len(rows[j]) for j in g))
+                chunks += [g[i: i + per] for i in range(0, len(g), per)]
+            outs, where = [], []
+            for idx in chunks:
+                chunk, own_l = [rows[j] for j in idx], [owner[j] for j in idx]
+                where += idx
+                own = torch.tensor(own_l, dtype=torch.long, device=dev)
+                c = fork(cache, own)
+                n, L = len(chunk), max(len(r) for r in chunk)
+                ids = torch.full((n, L), pad, dtype=torch.long)
+                m = torch.zeros((n, L), dtype=torch.long)
+                pos = torch.zeros((n, L), dtype=torch.long)
+                for j, (r, b) in enumerate(zip(chunk, own_l)):
+                    ids[j, : len(r)] = torch.tensor(r)
+                    m[j, : len(r)] = 1
+                    pos[j] = start_pos[b] + torch.arange(L)
+                ids, m, pos = ids.to(dev), m.to(dev), pos.to(dev)
+                out = self.encoder(input_ids=ids, attention_mask=torch.cat([prior_mask[own], m], dim=1), position_ids=pos,
+                                   past_key_values=c, use_cache=True)
+                h = self._head_view(out)
+                outs.append(h[torch.arange(n, device=dev), torch.tensor([len(r) for r in chunk], device=dev) - 1])
+            res = torch.cat(outs)
+            back = torch.empty(len(where), dtype=torch.long, device=dev)
+            back[torch.tensor(where, device=dev)] = torch.arange(len(where), device=dev)
+            return res[back]  # rows in their original order
+
+        state_pos = [len(st) for st in s_ids]
         rows, owner, plan = [], [], []
-        for q, starts, ends in zip(q_ids, starts_all, ends_all):
+        for qi, (q, starts, ends) in enumerate(zip(q_ids, starts_all, ends_all)):
             if starts is None:  # a yes/no field in the slot layout: its whole block after the state
                 plan.append(("plain", len(rows), None))
                 for b in range(nb):
@@ -424,50 +490,61 @@ class AmortizedDecisionModel(nn.Module):
                 continue
             head, tail = q[: starts[0]], q[ends[-1] + 1:]
             lines = [q[a: e + 1] for a, e in zip(starts, ends)]
+            if len(lines) >= nested_min:  # many options: run the question head once, then fork it per option line
+                plan.append(("nested", qi, (head, tail, lines)))
+                continue
             plan.append(("pointer", len(rows), len(lines)))
             for b in range(nb):
                 for r in [head + tail] + [head + line for line in lines]:
                     rows.append(r)
                     owner.append(b)
-
-        budget = int(os.environ.get("COXLM_FORK_TOKENS", "16384"))
-        per = max(1, budget // max(len(r) for r in rows))
-        outs = []
-        for i in range(0, len(rows), per):
-            chunk = rows[i: i + per]
-            own = torch.tensor(owner[i: i + per], dtype=torch.long, device=dev)
-            cache = copy.copy(base) if i + per < len(rows) else base  # the last chunk may consume the base cache
-            if cache is not base:
-                cache.layers = [copy.copy(layer) for layer in base.layers]
-                for layer in cache.layers:  # fresh containers: forking replaces tensors, never edits the base's
-                    for a in ("conv_states", "recurrent_states", "is_conv_states_initialized",
-                              "is_recurrent_states_initialized", "has_previous_state"):
-                        v = getattr(layer, a, None)
-                        if isinstance(v, (dict, list)):
-                            setattr(layer, a, type(v)(v))
-            cache.reorder_cache(own)
-            n, L = len(chunk), max(len(r) for r in chunk)
+        # one pass instead of two when it is cheaper: every row read as [its state + the row] with no cache. Each pass
+        # reads all the weights (~6 ms on an RTX 4090 for a 3B model), so for short states with few rows recomputing
+        # the state per row costs less than a separate state pass (a short yes/no: ~23 -> ~13 ms). Same answers: the
+        # backbone is causal, so a row sees exactly what it sees after a fork.
+        single = bool(rows) and not any(kind == "nested" for kind, _, _ in plan) and \
+            sum(state_pos[b] for b in owner) - sum(state_pos) <= int(os.environ.get("COXLM_PASS_COST_TOKENS", "256"))
+        if single:
+            seqs = [s_ids[b] + r for b, r in zip(owner, rows)]
+            n, L = len(seqs), max(len(q) for q in seqs)
             ids = torch.full((n, L), pad, dtype=torch.long)
-            m = torch.zeros((n, L), dtype=torch.long)
-            pos = torch.zeros((n, L), dtype=torch.long)
-            for j, (r, b) in enumerate(zip(chunk, owner[i: i + per])):
-                ids[j, : len(r)] = torch.tensor(r)
-                m[j, : len(r)] = 1
-                pos[j] = len(s_ids[b]) + torch.arange(L)  # branches start where their state ends
-            ids, m, pos = ids.to(dev), m.to(dev), pos.to(dev)
-            out = self.encoder(input_ids=ids, attention_mask=torch.cat([smask[own], m], dim=1), position_ids=pos,
-                               past_key_values=cache, use_cache=True)
+            msk = torch.zeros((n, L), dtype=torch.long)
+            for j, q in enumerate(seqs):
+                ids[j, : len(q)] = torch.tensor(q)
+                msk[j, : len(q)] = 1
+            pos = torch.arange(L).unsqueeze(0).expand(n, L)
+            out = self.encoder(input_ids=ids.to(dev), attention_mask=msk.to(dev), position_ids=pos.to(dev))
             h = self._head_view(out)
-            outs.append(h[torch.arange(n, device=dev), torch.tensor([len(r) for r in chunk], device=dev) - 1])
-        last = torch.cat(outs)
+            last = h[torch.arange(n, device=dev), torch.tensor([len(q) for q in seqs], device=dev) - 1]
+        else:
+            last = run_rows(get_base(), smask, state_pos, rows, owner) if rows else None
 
         slots, opts = [], []
         for kind, start, k in plan:
             if kind == "plain":
                 slots.append(last[start: start + nb])
                 opts.append(None)
-            else:
+            elif kind == "pointer":
                 blk = last[start: start + nb * (k + 1)].view(nb, k + 1, -1)
+                slots.append(blk[:, 0])
+                opts.append(blk[:, 1:])
+            else:
+                head, tail, lines = k
+                Lh = len(head)
+                own = torch.arange(nb, device=dev)
+                hc = fork(get_base(), own)  # stage 1: the question head on every state, once
+                hids = torch.tensor([head] * nb, dtype=torch.long, device=dev)
+                hpos = torch.tensor([[state_pos[b] + t for t in range(Lh)] for b in range(nb)], dtype=torch.long, device=dev)
+                hmask = torch.ones((nb, Lh), dtype=torch.long, device=dev)
+                self.encoder(input_ids=hids, attention_mask=torch.cat([smask, hmask], dim=1), position_ids=hpos,
+                             past_key_values=hc, use_cache=True)
+                rows2, owner2 = [], []
+                for b in range(nb):  # stage 2: the answer tail and each option line, forked from state + head
+                    for r in [tail] + lines:
+                        rows2.append(r)
+                        owner2.append(b)
+                h2 = run_rows(hc, torch.cat([smask, hmask], dim=1), [p + Lh for p in state_pos], rows2, owner2)
+                blk = h2.view(nb, len(lines) + 1, -1)
                 slots.append(blk[:, 0])
                 opts.append(blk[:, 1:])
         self._pointer_opts = opts

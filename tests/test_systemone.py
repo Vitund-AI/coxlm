@@ -25,6 +25,7 @@ def test_to_matrix_request_shapes():
     # choice criteria -> "name" or "name: desc" lines
     assert qs[0]["options"].splitlines() == ["evict: begin eviction", "warn", "wait: do nothing"]
     assert qs[1]["type"] == "yesno" and qs[1]["question"] == "Is this urgent?"
+    assert qs[1]["options"].splitlines() == ["no: can wait", "yes: needs action now"]  # noul true/false descriptions
     assert qs[2]["type"] == "score"
     # score levels -> 0-indexed "value: label" lines
     assert qs[2]["options"].splitlines() == ["0: minor", "1: moderate", "2: serious", "3: critical"]
@@ -91,3 +92,22 @@ def test_score_probabilities_keyed_by_level_index():
     cell = {"probabilities": {"low": 0.2, "medium": 0.5, "high": 0.3}}
     assert _score_probs_by_index(cell, legend) == {"0": 0.2, "1": 0.5, "2": 0.3}
     assert _score_probs_by_index({"probabilities": {"0": 1.0, "1": 0.0, "2": 0.0}}, legend) == {"0": 1.0, "1": 0.0, "2": 0.0}
+
+
+
+def test_noul_descriptions_reach_the_field():
+    """noul / true-false criteria land in the yes/no field on every path (System One, native wire, Python)."""
+    from coxlm.schema import yesno
+    from coxlm.serve import build_schema
+    from coxlm.wire import field_from_json
+
+    _, matrix = to_matrix_request(REQ)
+    f = build_schema(matrix["questions"][1]).fields[0]
+    assert f.kind == "yesno" and f.descriptions == ("can wait", "needs action now")
+    g = field_from_json("u", {"type": "noul", "instructions": "Is this urgent?",
+                              "criteria": {"true": "needs action now", "false": "can wait"}})
+    assert g.kind == "yesno" and g.descriptions == ("can wait", "needs action now")
+    assert yesno("Is this urgent?", {"true": "now", "false": "later"}).descriptions == ("later", "now")
+    assert yesno("Is this urgent?").descriptions is None
+    plain = build_schema({"type": "yesno", "question": "Is this urgent?"}).fields[0]  # no criteria: unchanged
+    assert plain.descriptions is None

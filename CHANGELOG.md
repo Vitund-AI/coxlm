@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+- Loads cox-1 model exports (the format of `Vitund/cox-1-3b`): a Hugging Face text-model folder plus
+  `cox_head.safetensors` and `cox_config.json`, from a folder or a Hub repo id.
+- Faster: a short yes/no request takes about 13 ms instead of 27 ms on an RTX 4090 (short requests now run in one
+  pass), a question with 77 options about 135 ms instead of 400 ms (the question is read once and each option forks
+  from it; option rows are grouped by length), and a 6k-token text about 350 ms instead of 630 ms (see the next
+  item). Answers are unchanged within bf16 rounding.
+- Offline use (`HF_HUB_OFFLINE=1`) now keeps the fast linear-attention kernels; before, both silently fell back to
+  the slow PyTorch path.
+- `COXLM_COMPILE=1` (opt-in) compiles each backbone block: about 19% faster on long texts.
+- `coxlm-serve` starts with model exports, and no longer frees and re-allocates GPU memory after every request.
+- Yes/no questions take `noul` and `true`/`false` as well as `yesno` and `yes`/`no`. A System One `noul`
+  question's `true` and `false` criteria now reach the model as the yes/no descriptions, as `{"no", "yes"}`
+  descriptions do on the native API and in `yesno(...)`; before, they were dropped.
+
 ## 0.3.0 (2026-10-09)
 
 - Pointer-readout models on hybrid backbones (Qwen3.5) now run. The states are encoded once with the cache on, and

@@ -194,10 +194,12 @@ def score(levels: Mapping[str, str] | Iterable[str], instructions: str = "", nam
 
 def yesno(instructions: str, criteria: Mapping[str, str] | None = None, name: str = "") -> Field:
     """A yes/no judgment, answered as P(yes). ``criteria`` may clarify what "no"
-    and "yes" mean, as {"no": ..., "yes": ...}."""
+    and "yes" mean, as {"no": ..., "yes": ...} ({"false": ..., "true": ...} is read the same way)."""
     descriptions = None
     if criteria:
-        descriptions = (criteria.get("no", ""), criteria.get("yes", ""))
+        no = criteria.get("no", criteria.get("false", "")) or ""
+        yes = criteria.get("yes", criteria.get("true", "")) or ""
+        descriptions = (str(no), str(yes)) if (no or yes) else None
     return Field(name, ("no", "yes"), instructions=instructions, descriptions=descriptions, kind="yesno")
 
 

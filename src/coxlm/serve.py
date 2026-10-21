@@ -333,7 +333,7 @@ def build_schema(q):
     typ = q.get("type", "choice")
     question = q.get("question", "") or "answer"
     if typ == "yesno":
-        return questions(answer=yesno(question))
+        return questions(answer=yesno(question, parse_options(q.get("options", "") or "")[1] or None))
     if typ == "features":
         # each line is a whole feature, taken verbatim (colons are part of the feature, not a delimiter)
         feats = [l.strip() for l in q.get("options", "").splitlines() if l.strip()]
@@ -359,7 +359,7 @@ def build_schema(q):
 def _one_field(typ, question, options_text, name):
     from dataclasses import replace
     if typ == "yesno":
-        return replace(yesno(question or "answer"), name=name)
+        return replace(yesno(question or "answer", parse_options(options_text or "")[1] or None), name=name)
     if typ == "features":
         feats = [l.strip() for l in options_text.splitlines() if l.strip()]
         if not feats:
@@ -551,6 +551,10 @@ def _page():
 
 
 class Handler(BaseHTTPRequestHandler):
+    # headers and body go out as two writes: with Nagle on, the body waited for the client's delayed ACK (~40 ms
+    # on every response large enough to need a second segment, e.g. a 77-option answer)
+    disable_nagle_algorithm = True
+
     def log_message(self, *a):
         pass
 
@@ -583,11 +587,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             self._post()
-        finally:  # give back cached activation memory (long states), so the GPU can be shared
+        finally:  # give back cached activation memory after a large request (long states), so the GPU can be shared;
+            # not after every request: re-allocating the cache cost ~45 ms per 77-option answer (2026-10-20)
             try:
                 import torch
                 if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    spare = torch.cuda.memory_reserved() - torch.cuda.memory_allocated()
+                    if spare > float(os.environ.get("COXLM_KEEP_CACHE_GB", "4")) * 2 ** 30:
+                        torch.cuda.empty_cache()
             except ImportError:
                 pass
 
@@ -662,7 +669,7 @@ def main(argv=None) -> None:
     httpd = serve(model, port=args.port, host=args.host, model_name=args.model_name,
                   encoder=model.encoder_name, checkpoint=args.model)
     infer({"state": "warmup", "question": "warm?", "type": "yesno", "options": ""})  # compile kernels before the first request
-    print(f"ready -> http://localhost:{args.port}  (model {MODEL_NAME}, format {model.prompt_format}, device {model.device})", flush=True)
+    print(f"ready -> http://localhost:{args.port}  (model {MODEL_NAME}, format {getattr(model, 'prompt_format', 'default')}, device {model.device})", flush=True)
     httpd.serve_forever()
 
 

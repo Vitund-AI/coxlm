@@ -21,8 +21,8 @@ servers) is:
 These functions are PURE dict transforms (no model), so they unit-test on their
 own. The server (coxlm.serve) wires them around its ``infer_matrix``. coxlm's
 own extension types (multiscore, features, order) are not part of this contract;
-they ride the native API. A noul's true/false descriptions are not yet threaded
-(coxlm yesno uses its trained no/yes descriptions); everything else round-trips.
+they ride the native API. A noul's true/false descriptions become the yes/no
+descriptions; everything round-trips.
 """
 
 from __future__ import annotations
@@ -71,7 +71,9 @@ def to_matrix_request(req: dict) -> tuple[list[str], dict]:
         instr = _as_text(spec.get("instructions"))
         criteria = spec.get("criteria")
         if typ == "noul":
-            cox_qs.append({"type": "yesno", "question": instr or "answer"})
+            crit = criteria if isinstance(criteria, dict) else {}
+            lines = [f"{k}: {_as_text(crit[src])}" for k, src in (("no", "false"), ("yes", "true")) if crit.get(src)]
+            cox_qs.append({"type": "yesno", "question": instr or "answer", "options": "\n".join(lines)})
         elif typ == "choice":
             if not isinstance(criteria, dict) or len(criteria) < 1:
                 raise ValueError(f"question {qid!r}: choice needs a criteria object of options")

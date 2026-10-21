@@ -10,9 +10,9 @@ options you defined. The model cannot return an option you did not offer. Every
 answer comes with a confidence that is calibrated: answers given with confidence
 0.9 were right about 90% of the time in evaluation.
 
-This is a research build. **Model weights are not distributed yet.** Use
-`coxlm.connect()` to talk to a running coxlm server. If you have a checkpoint,
-`coxlm.load()` runs it on your own GPU.
+The open-weight model is **cox-1-3b** ([Vitund/cox-1-3b](https://huggingface.co/Vitund/cox-1-3b), Apache-2.0).
+`coxlm.load("Vitund/cox-1-3b")` downloads and runs it on your own GPU, and
+`coxlm.connect()` talks to a running coxlm server.
 
 ## Install
 
@@ -36,9 +36,9 @@ from coxlm import Questions, choice, score, yesno
 # Connect to a running coxlm server (no GPU or PyTorch needed on this machine)
 model = coxlm.connect("http://localhost:8000")
 
-# Or run a checkpoint on your own GPU (pip install "coxlm[local]"): a model.pt file, a release folder
-# (model.safetensors + config.json), or a Hugging Face repo id such as "owner/name"
-# model = coxlm.load("path/to/model.pt")
+# Or run the model on your own GPU (pip install "coxlm[local]"): a Hugging Face repo id, a release folder
+# or a model.pt checkpoint
+# model = coxlm.load("Vitund/cox-1-3b")
 
 
 # The questions, as a class: one attribute per question
@@ -218,7 +218,7 @@ examples with real output: [vitund.ai/open-source/coxlm/examples](https://vitund
 
 ```bash
 pip install "coxlm[serve] @ git+https://github.com/Vitund-AI/coxlm.git"
-coxlm-serve --model path/to/model.pt --encoder Qwen/Qwen3.5-4B-Base --port 8000
+coxlm-serve --model Vitund/cox-1-3b --port 8000
 ```
 
 The checkpoint records the backbone it was trained on, so you can leave out
@@ -229,8 +229,8 @@ automatically, and so are the two readouts: slot-head and pointer-head models
 both run, including pointer-head models on hybrid backbones such as Qwen3.5. `python -m coxlm.serve ...` does the same as `coxlm-serve`.
 The first run downloads the backbone from the Hugging Face Hub. The backbone
 runs in bf16, the precision models are trained and evaluated in, whatever
-precision the checkpoint was saved in (`--dtype` overrides it). A 4B backbone
-needs about 10 GB of GPU memory.
+precision the checkpoint was saved in (`--dtype` overrides it). cox-1-3b needs
+about 6 GB of GPU memory for 1k-token texts and about 7 GB at 8k.
 
 | endpoint | what it does |
 |---|---|
@@ -272,7 +272,13 @@ The server has no authentication. Run it on a trusted network.
   loading. It measures the accuracy cost only and does not make inference faster.
 - `COX_HUB_CONV1D=0` turns off the Hugging Face hub causal-conv1d kernel. That
   kernel is used for Qwen3.5 backbones when the `kernels` package is installed
-  (`pip install "coxlm[fast]"`).
+  (`pip install "coxlm[fast]"`). It works offline (`HF_HUB_OFFLINE=1`) once it has
+  been downloaded by one online run.
+- `COXLM_COMPILE=1` compiles each backbone block with `torch.compile`: about 19%
+  faster on long texts, no change on short ones, and roughly 100 s of compiling
+  over the first requests. Useful for long-running servers.
+- `COXLM_KEEP_CACHE_GB` (default 4): the server gives cached GPU memory back to
+  the system when more than this much is unused, for example after a very long text.
 
 ## License
 

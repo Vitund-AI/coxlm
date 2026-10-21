@@ -63,7 +63,7 @@ def field_from_json(name: str, spec: Mapping[str, Any]) -> Field:
     if kind == "yesno":
         desc = None
         if isinstance(raw, Mapping) and raw:
-            desc = (str(raw.get("no", "") or ""), str(raw.get("yes", "") or ""))
+            desc = (str(raw.get("no", raw.get("false", "")) or ""), str(raw.get("yes", raw.get("true", "")) or ""))
         return Field(name, ("no", "yes"), instructions=instructions, descriptions=desc, kind="yesno")
     if isinstance(raw, Mapping):
         options = tuple(str(k) for k in raw.keys())

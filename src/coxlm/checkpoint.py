@@ -21,7 +21,14 @@ from .model import AmortizedDecisionModel
 META_KEY = "__cox_meta__"
 
 
-HUB_FILES = ["config.json", "*.safetensors", "*.safetensors.index.json", "README.md", "LICENSE"]
+HUB_FILES = ["config.json", "*.safetensors", "*.safetensors.index.json", "README.md", "LICENSE", "NOTICE",
+             "cox_config.json", "tokenizer*", "vocab.json", "merges.txt", "special_tokens_map.json", "chat_template*"]
+
+
+def is_export(path: str | os.PathLike) -> bool:
+    """A model export: a standard Hugging Face text-model folder (config.json + model.safetensors + tokenizer) with
+    the Cox head beside it (cox_head.safetensors + cox_config.json). cox-1 and later ship in this format."""
+    return os.path.isdir(path) and os.path.exists(os.path.join(path, "cox_config.json"))
 
 
 def resolve(path: str | os.PathLike, revision: str | None = None) -> str:
@@ -206,7 +213,7 @@ def load_state(model: AmortizedDecisionModel, path: str | dict) -> AmortizedDeci
     model.trained_features = set(meta.get("features", []))
     model.checkpoint_meta = meta
     if build.get("readout_mode", "slot") != "slot":  # create the pointer head before its weights are loaded
-        model.set_readout(build["readout_mode"])
+        model.set_readout(build["readout_mode"], **({"dp": int(build["pointer_dim"])} if build.get("pointer_dim") else {}))
     model.option_isolation = bool(build.get("option_isolation", False))
     model.pointer_yesno = bool(build.get("pointer_yesno", True))
     model.clear_cache()
