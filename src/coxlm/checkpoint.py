@@ -22,7 +22,7 @@ META_KEY = "__cox_meta__"
 
 
 HUB_FILES = ["config.json", "*.safetensors", "*.safetensors.index.json", "README.md", "LICENSE", "NOTICE",
-             "cox_config.json", "tokenizer*", "vocab.json", "merges.txt", "special_tokens_map.json", "chat_template*"]
+             "cox_config.json", "adapter_config.json", "report.json", "tokenizer*", "vocab.json", "merges.txt", "special_tokens_map.json", "chat_template*"]
 
 
 def is_export(path: str | os.PathLike) -> bool:

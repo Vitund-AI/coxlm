@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `coxlm.finetune(model, examples, questions, out_dir)`: adapts a model export to your labelled examples with a
+  small LoRA adapter (hard labels or probability targets; `(text, answers)` pairs or JSONL rows). It sets a
+  stratified held-out share aside, fits one temperature on it, and prints and saves (`report.json`) a before/after
+  report: accuracy, skill over the most common label, ECE, and the share of decisions automatable at 95% accuracy.
+  It also checks a small built-in set of general questions and warns if they got worse.
+- `coxlm.load(export, adapter=...)` applies such an adapter (a folder or a Hub repo id; PEFT-named LoRA tensors),
+  with its temperature; it refuses an adapter trained on another base. `merge=True` folds it into the weights.
+  PyTorch backend only for now.
+- Qwen3.5 models on the CPU or Apple MPS no longer fail when flash-linear-attention is installed: its kernels take
+  CUDA tensors only, so those calls now use the PyTorch reference.
+- `examples/doom`: fine-tune the model on Doom decisions and watch it play ViZDoom.
+
 ## 0.4.2 (unreleased)
 
 - `load()` picks the Apple GPU (MPS) on Apple silicon when there is no CUDA GPU, and uses float32 on an Apple-silicon

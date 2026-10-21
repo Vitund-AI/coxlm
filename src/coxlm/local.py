@@ -13,13 +13,16 @@ _BUILD_KEYS = ("state_norm", "pool")
 
 
 def load(path: str | os.PathLike, encoder: str | None = None, device: str | None = None, dtype: str | None = None,
-         max_length: int = 2048, revision: str | None = None):
+         max_length: int = 2048, revision: str | None = None, adapter: str | os.PathLike | None = None,
+         adapter_revision: str | None = None, merge: bool = False):
     """Load a checkpoint for local inference. Returns the model; call ``model.decide(state, questions)``.
 
     ``encoder`` is the Hugging Face backbone the checkpoint was trained on (e.g. "Qwen/Qwen3.5-4B-Base");
     it defaults to the one recorded in the checkpoint. Adapter (LoRA) and full-weight checkpoints are told
     apart from the checkpoint itself. ``dtype`` is the backbone dtype (default bf16, the dtype models are
     trained and evaluated in; fp32 checkpoints are cast down); ``device`` defaults to CUDA when available. ``max_length`` is the state token budget.
+    ``adapter`` (model exports only): a fine-tune adapter folder or Hub repo id (see coxlm.adapter), applied on top;
+    ``merge=True`` folds it into the backbone's weights.
     """
     import torch
 
@@ -30,7 +33,13 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
     source = str(path)
     path = resolve(path, revision=revision)
     if is_export(path):
-        return _load_export(path, source, device=device, dtype=dtype, max_length=max_length)
+        model = _load_export(path, source, device=device, dtype=dtype, max_length=max_length)
+        if adapter is not None:
+            from .adapter import apply_adapter
+            apply_adapter(model, resolve(adapter, revision=adapter_revision), merge=merge)
+        return model
+    if adapter is not None:
+        raise ValueError(f"{source}: adapters apply to model exports (such as Vitund/cox-1-3b), not to this checkpoint format")
     state = read_checkpoint(path)
     meta = checkpoint_meta(state)
     encoder = encoder or meta.get("encoder")
@@ -110,6 +119,7 @@ def _load_export(path: str, source: str, device: str | None = None, dtype: str |
     model.max_length = max_length
     model.encoder_name = cfg.get("base_model")
     model.checkpoint_path = source
+    model.export_path = path  # what an adapter's base check fingerprints (coxlm.adapter)
     return _maybe_compile(model)
 
 
