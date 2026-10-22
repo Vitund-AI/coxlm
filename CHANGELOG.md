@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2
+
+- `load()` reads packed exports (`"weights": {"format": "codebook4"}` in cox_config.json): 4-bit codebook weights,
+  about half the download, unpacked to bfloat16 as the model loads, so answers and speed match the unpacked export.
+  PyTorch and MLX backends.
+
 ## Unreleased
 
 - `coxlm.finetune(model, examples, questions, out_dir)`: adapts a model export to your labelled examples with a
