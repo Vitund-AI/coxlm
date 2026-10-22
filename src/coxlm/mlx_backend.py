@@ -105,10 +105,15 @@ def _load_backbone(path: str, final_norm: str | None, dtype: str = "bf16", quant
     if config.get("model_type") not in MLX_MODEL_TYPES:
         raise NotImplementedError(f"the MLX backend runs Qwen3.5 backbones; this export is {config.get('model_type')!r}")
     model = TextModel(TextModelArgs.from_dict(config))
-    files = [os.path.join(path, f) for f in sorted(os.listdir(path)) if f.startswith("model") and f.endswith(".safetensors")]
-    weights: dict[str, Any] = {}
-    for f in files:
-        weights.update(mx.load(f))
+    from .packed import packed_info, unpack_mlx
+    info = packed_info(path)
+    if info is not None:  # a packed export (4-bit codebooks): unpacked to bf16 here, computed in bf16 as usual
+        weights: dict[str, Any] = unpack_mlx(path, info)
+    else:
+        files = [os.path.join(path, f) for f in sorted(os.listdir(path)) if f.startswith("model") and f.endswith(".safetensors")]
+        weights = {}
+        for f in files:
+            weights.update(mx.load(f))
     weights = {k.replace("model.language_model.", "model."): v for k, v in weights.items()
                if not k.startswith(("mtp.", "model.visual", "lm_head"))}
     norm_suffixes = (".input_layernorm.weight", ".post_attention_layernorm.weight", ".q_norm.weight", ".k_norm.weight")

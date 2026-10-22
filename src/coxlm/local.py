@@ -100,8 +100,24 @@ def _load_export(path: str, source: str, device: str | None = None, dtype: str |
     dev = device or _default_device()
     if not str(dev).startswith("cuda"):  # the hub causal-conv1d kernel is CUDA-only (CPU, Apple MPS)
         os.environ.setdefault("COX_HUB_CONV1D", "0")
-    model = build_model(path, lora_r=0, pretrained_weights=True, state_norm=build.get("state_norm") or "standardize",
-                        dtype=dtype or _default_dtype(dev))
+    from .packed import iter_unpacked_torch, packed_info
+    info = packed_info(path)  # a packed export (4-bit codebooks): build from the config, unpack to bf16 one weight
+    model = build_model(path, lora_r=0, pretrained_weights=info is None,  # at a time straight into place
+                        state_norm=build.get("state_norm") or "standardize", dtype=dtype or _default_dtype(dev))
+    if info is not None:
+        own = model.encoder.state_dict()
+        seen = set()
+        with torch.no_grad():
+            for k, v in iter_unpacked_torch(path, info, device="cpu"):
+                k = k[len("model."):] if k.startswith("model.") else k
+                if k not in own:
+                    raise RuntimeError(f"{path}: packed weight {k!r} is not in the backbone")
+                own[k].copy_(v.to(own[k].dtype))
+                seen.add(k)
+        missing = sorted(set(own) - seen)
+        if missing:
+            raise RuntimeError(f"{path}: the packed export lacks backbone weights, e.g. {missing[:3]}")
+        del own
     if cfg.get("final_norm") == "identity":
         text = next((m for m in model.encoder.modules()
                      if isinstance(m._modules.get("layers"), nn.ModuleList) and "norm" in m._modules), None)
