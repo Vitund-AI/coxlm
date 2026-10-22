@@ -21,10 +21,12 @@ What we measured on an RTX 4080 SUPER (16 GB) under WSL2: about 10 GB of GPU mem
 | fine-tune | held-out accuracy | button accuracy | score per episode |
 |---|---|---|---|
 | none (the base model) | 79.3% | 65.3% | about 0.2 |
-| 30 steps | 86.7% | 80.0% | about 7 to 8 |
-| 425 steps (the default) | 93.3% | 90.7% | 23.6 |
+| 30 steps (about 4 minutes) | 86.7% | 80.0% | about 7 to 8 |
+| 60 steps (about 7 minutes) | 90.7% | 85.0% | 18.2 (20 episodes, sd 5.0) |
+| 425 steps (the default, about 42 minutes) | 93.3% | 90.7% | 23.6 |
 
-A game is a chain of 300 to 400 decisions per episode, and one bad turn at the wrong moment ends it, so a few points
+A short run is already useful (about 7 minutes gives 18 kills per episode), and the default gives the best and most
+consistent play: every episode between 22 and 25, where the 60-step adapter ranged from 10 to 25. A game is a chain of 300 to 400 decisions per episode, and one bad turn at the wrong moment ends it, so a few points
 of held-out accuracy make a large difference to the score. The same holds wherever Cox's answers drive a sequence of
 actions: judge a fine-tune by the end result, not only by the held-out numbers.
 
