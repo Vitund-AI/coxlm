@@ -1,12 +1,14 @@
 """The remote model: ``coxlm.connect(url)`` talks to a coxlm server's POST /v1/decide.
 
-Standard library only (urllib), so a laptop without a GPU or torch can use it.
+Standard library only (http.client), so a laptop without a GPU or torch can use it. Each thread keeps one HTTP/1.1
+connection open to the server, so only the first request pays the TCP (and TLS) handshake.
 """
 from __future__ import annotations
 
+import http.client
 import json
-import urllib.error
-import urllib.request
+import threading
+import urllib.parse
 from typing import Any, Iterable, Iterator, overload
 
 from .decide import Answers, Q, answers_class, as_schema, iter_batches
@@ -29,14 +31,23 @@ class RemoteModel:
         self.timeout = timeout
         self.headers = dict(headers or {})
         self.closed = False
+        u = urllib.parse.urlsplit(url)
+        self._https = u.scheme == "https"
+        self._host, self._port, self._base = u.hostname, u.port, u.path.rstrip("/")
+        self._local = threading.local()  # one persistent connection per thread (http.client is not thread-safe)
+        self._conns: list = []
+        self._lock = threading.Lock()
 
     def __repr__(self) -> str:
         return f"RemoteModel({self.url!r})"
 
     def close(self) -> None:
-        """Stop using the server: later calls raise CoxlmError. (Requests do not hold a connection open today, so
-        nothing else needs releasing; a pooled connection, if added, is closed here.)"""
+        """Stop using the server: close the open connections; later calls raise CoxlmError."""
         self.closed = True
+        with self._lock:
+            for c in self._conns:
+                c.close()
+            self._conns.clear()
 
     def __enter__(self) -> "RemoteModel":
         return self
@@ -44,25 +55,45 @@ class RemoteModel:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
+    def _conn(self, fresh: bool = False):
+        c = getattr(self._local, "conn", None)
+        if c is None or fresh:
+            if c is not None:
+                c.close()
+            cls = http.client.HTTPSConnection if self._https else http.client.HTTPConnection
+            c = cls(self._host, self._port, timeout=self.timeout)
+            self._local.conn = c
+            with self._lock:
+                self._conns.append(c)
+        return c
+
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
         if self.closed:
             raise CoxlmError(f"this model was closed; connect to {self.url} again to use it")
         data = None if body is None else json.dumps(body).encode()
-        req = urllib.request.Request(self.url + path, data=data, method=method,
-                                     headers={"Content-Type": "application/json", **self.headers})
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+        headers = {"Content-Type": "application/json", **self.headers}
+        for attempt in (0, 1):  # a kept-alive connection the server has since closed is retried once on a new one
+            conn = self._conn(fresh=attempt == 1)
+            try:
+                conn.request(method, self._base + path, body=data, headers=headers)
+                resp = conn.getresponse()
                 payload = resp.read()
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode(errors="replace")
+                break
+            except (OSError, http.client.HTTPException) as e:
+                # on the reused connection any socket error may only mean the server closed it while idle: retry once
+                # on a new connection; an error on the new one is real
+                conn.close()
+                if attempt == 1:
+                    self._local.conn = None
+                    raise CoxlmError(f"cannot reach coxlm server at {self.url}: {e}") from None
+        if resp.status >= 400:
+            detail = payload.decode(errors="replace")
             try:
                 err = json.loads(detail).get("error")
                 detail = err.get("message", detail) if isinstance(err, dict) else (err or detail)
             except (ValueError, AttributeError):
                 pass
-            raise CoxlmError(f"{method} {path}: HTTP {e.code}: {detail}") from None
-        except urllib.error.URLError as e:
-            raise CoxlmError(f"cannot reach coxlm server at {self.url}: {e.reason}") from None
+            raise CoxlmError(f"{method} {path}: HTTP {resp.status}: {detail}")
         return json.loads(payload)
 
     def health(self) -> dict:

@@ -106,3 +106,31 @@ def test_unreachable_server_raises():
 def test_import_does_not_import_torch():
     code = "import sys, coxlm, coxlm.serve, coxlm.wire, coxlm.systemone; assert 'torch' not in sys.modules, 'torch imported'"
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_keep_alive_one_connection_many_requests(server):
+    """HTTP/1.1: the server keeps the connection open (each response carries Content-Length), and coxlm.connect()
+    reuses it, so only the first request pays the TCP handshake."""
+    import http.client
+    import urllib.parse
+    url, _ = server
+    u = urllib.parse.urlsplit(url)
+    c = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+    for _ in range(3):  # three requests on one socket
+        c.request("GET", "/v1/models")
+        r = c.getresponse()
+        assert r.status == 200 and r.version == 11 and r.getheader("Content-Length")
+        r.read()
+    sock = c.sock
+    c.request("GET", "/health")
+    c.getresponse().read()
+    assert c.sock is sock  # still the same connection
+    c.close()
+    model = coxlm.connect(url)
+    schema = questions(spam=yesno("Is this spam?"))
+    for _ in range(4):
+        model.decide("hello", schema)
+    assert len(model._conns) == 1  # one connection for four decisions
+    model._conns[0].sock.close()  # the server (or a proxy) drops an idle connection: the client reconnects once
+    assert model.decide("hello", schema)["spam"].p_yes >= 0
+    model.close()
