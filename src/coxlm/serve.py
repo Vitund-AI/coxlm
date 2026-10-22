@@ -429,6 +429,9 @@ def _fields(ans):
              "choice": a.choice, "score": a.score, "p_yes": a.p_yes, "none": a.none} for name, a in ans.items()]
 
 
+REJECT_OVERLONG = False
+
+
 def _tok_count(text):
     tok = getattr(MODEL, "tokenizer", None)
     return len(tok(text, add_special_tokens=False)["input_ids"]) if tok is not None else len(text.split())
@@ -445,6 +448,11 @@ def infer_matrix(q):
     parsed = [(it.get("id"), it.get("state", "")) if isinstance(it, dict) else (None, it) for it in raw]
     texts = [t for _, t in parsed]
     cap = _max_tokens()
+    if REJECT_OVERLONG:  # refuse instead of silently truncating (benchmark harnesses count this as a declared limit)
+        for t in texts:
+            n = _tok_count(t) if isinstance(t, str) else 0
+            if n > cap:
+                raise ValueError(f"the state is longer than the maximum model length ({n} > {cap} tokens)")
     sync = _sync
     has_fields = schema is not None and len(list(schema)) > 0
     answers = []
@@ -665,9 +673,13 @@ def main(argv=None) -> None:
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--max-length", type=int, default=2048, help="state token budget")
+    ap.add_argument("--reject-overlong", action="store_true",
+                    help="answer HTTP 422 for a state over --max-length instead of truncating it")
     ap.add_argument("--device", default=None, help="cuda / cpu (default: cuda when available)")
     ap.add_argument("--model-name", default=None, help="id reported by /v1/models and echoed in responses (default: from encoder)")
     args = ap.parse_args(argv)
+    global REJECT_OVERLONG
+    REJECT_OVERLONG = args.reject_overlong
     from .local import load
 
     print(f"loading {args.model}...", flush=True)
