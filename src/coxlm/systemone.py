@@ -42,16 +42,26 @@ def _as_text(x: Any) -> str:
     return json.dumps(x, ensure_ascii=False, indent=2)
 
 
+def _one_line(x: Any) -> str:
+    """An option or level description on one line: the options text is one option per line, so a description with
+    line breaks (a poem, an address, a code snippet) would otherwise be read as several options. Lines are joined with
+    " / ", the usual way to quote verse inline."""
+    t = x if isinstance(x, str) else json.dumps(x, ensure_ascii=False, separators=(", ", ": "))
+    if "\n" not in t and "\r" not in t:
+        return t
+    return " / ".join(part.strip() for part in t.splitlines() if part.strip())
+
+
 def _choice_options_text(criteria: dict[str, Any]) -> str:
     lines = []
     for name, desc in criteria.items():
-        lines.append(str(name) if desc in (None, "") else f"{name}: {desc}")
+        lines.append(_one_line(name) if desc in (None, "") else f"{_one_line(name)}: {_one_line(desc)}")
     return "\n".join(lines)
 
 
 def _score_options_text(criteria: list[Any]) -> str:
     # the server's score parser reads "value: label" lines (parse_score); System One levels are 0-indexed
-    return "\n".join(f"{i}: {_as_text(d)}" for i, d in enumerate(criteria))
+    return "\n".join(f"{i}: {_one_line(d)}" for i, d in enumerate(criteria))
 
 
 def to_matrix_request(req: dict) -> tuple[list[str], dict]:
@@ -72,7 +82,7 @@ def to_matrix_request(req: dict) -> tuple[list[str], dict]:
         criteria = spec.get("criteria")
         if typ == "noul":
             crit = criteria if isinstance(criteria, dict) else {}
-            lines = [f"{k}: {_as_text(crit[src])}" for k, src in (("no", "false"), ("yes", "true")) if crit.get(src)]
+            lines = [f"{k}: {_one_line(crit[src])}" for k, src in (("no", "false"), ("yes", "true")) if crit.get(src)]
             cox_qs.append({"type": "yesno", "question": instr or "answer", "options": "\n".join(lines)})
         elif typ == "choice":
             if not isinstance(criteria, dict) or len(criteria) < 1:
@@ -126,9 +136,14 @@ def from_matrix_result(matrix_result: dict, ids: list[str], req: dict,
         if kind == "yesno":
             answers[qid] = {"type": "noul", "noul": cell.get("p_yes")}
         elif kind == "choice":
-            answers[qid] = {"type": "choice", "choice": cell.get("choice"),
+            # option names were put on one line for the model (_one_line); answer with the caller's own names
+            names = {_one_line(n): n for n in ((questions.get(qid) or {}).get("criteria") or {})}
+            probs = cell.get("probabilities")
+            if isinstance(probs, dict):
+                probs = {names.get(k, k): v for k, v in probs.items()}
+            answers[qid] = {"type": "choice", "choice": names.get(cell.get("choice"), cell.get("choice")),
                             "confidence": cell.get("confidence"),
-                            "probabilities": cell.get("probabilities")}
+                            "probabilities": probs}
         elif kind == "score":
             criteria = (questions.get(qid) or {}).get("criteria") or []
             legend = {str(i): _as_text(d) for i, d in enumerate(criteria)}
