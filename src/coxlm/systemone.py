@@ -102,7 +102,8 @@ def to_matrix_request(req: dict) -> tuple[list[str], dict]:
 def _usage(matrix_result: dict) -> dict:
     res = (matrix_result.get("results") or [{}])[0]
     # matrix results don't carry token counts; report what we have honestly
-    return {"input_tokens": res.get("state_tokens"), "output_tokens": len(res.get("cells", []))}
+    # state tokens only (question and option tokens are not counted here); always an integer, as callers sum it
+    return {"input_tokens": int(res.get("state_tokens") or 0), "output_tokens": len(res.get("cells", []))}
 
 
 def _score_probs_by_index(cell: dict, legend: dict[str, str]) -> dict[str, float] | None:

@@ -491,9 +491,10 @@ def infer_matrix(q):
             a = ans[m["name"]]
             cells.append({"kind": a.kind, "choice": a.choice, "p_yes": a.p_yes, "score": a.score,
                           "confidence": a.confidence, "probabilities": a.probabilities, "none": a.none})
+        n_tok = _tok_count(text) if isinstance(text, str) else 0
         results.append({"id": rid if rid is not None else idx, "index": idx,
                         "hash": hashlib.sha1(text.encode()).hexdigest()[:8],
-                        "truncated": _tok_count(text) > cap, "cells": cells})
+                        "truncated": n_tok > cap, "state_tokens": n_tok, "cells": cells})
     n_dec = len(results) * len(qmeta)
     return {"questions": qmeta, "results": results, "infer_ms": round(infer_ms + order_ms, 1),
             "n_states": len(results), "n_questions": len(qmeta), "n_decisions": n_dec,
