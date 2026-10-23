@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.3
+
+- System One endpoint: option and level descriptions that contain line breaks (verse, addresses) or are JSON objects
+  are kept as one option each. They were split into extra options, so a two-option question could come back with
+  seven answers. Answers are keyed by the caller's own option names.
+- System One responses report `usage.input_tokens` as an integer (the state's tokens), never `null`.
+- `coxlm-serve --reject-overlong`: answer HTTP 422 ("longer than the maximum model length") for a state over
+  `--max-length` instead of truncating it.
+- Tests run on GitHub Actions (core without torch on Python 3.10-3.13, CPU PyTorch, MLX CPU build).
+
 ## 0.6.2
 
 - `load()` reads packed exports (`"weights": {"format": "codebook4"}` in cox_config.json): 4-bit codebook weights,

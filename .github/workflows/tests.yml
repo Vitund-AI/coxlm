@@ -1,0 +1,56 @@
+name: tests
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    # the client, schema, System One translation and the server around a fake model: no torch
+    name: core (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[test]"
+      - run: python -m pytest -q
+
+  local:
+    # in-process inference, fine-tuning and adapters on a tiny export, CPU-only PyTorch
+    name: local (CPU torch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -e ".[local,test]"
+      - run: python -m pytest -q
+
+  mlx:
+    # the MLX backend on mlx's Linux CPU build (the Apple GPU path is checked on a Mac by hand)
+    name: mlx (CPU build)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -e ".[local,mlx,test]" "mlx[cpu]"
+      - run: python -m pytest -q tests/test_mlx_backend.py

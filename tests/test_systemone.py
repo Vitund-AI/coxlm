@@ -111,3 +111,34 @@ def test_noul_descriptions_reach_the_field():
     assert yesno("Is this urgent?").descriptions is None
     plain = build_schema({"type": "yesno", "question": "Is this urgent?"}).fields[0]  # no criteria: unchanged
     assert plain.descriptions is None
+
+
+def test_multiline_and_structured_options_stay_one_per_line():
+    # A limerick (line breaks) or a JSON object as an option description must stay ONE option: the options text is
+    # one option per line, and splitting them turned 2 options into 7 (Decision Index BPoMP, POP909).
+    req = {"state": "x", "questions": {
+        "poem": {"type": "choice", "instructions": "Which is the original?",
+                 "criteria": {"option_0": "There once was a cat\nWho sat on a mat.",
+                              "option_1": "There once was a dog\nWho sat on a log."}},
+        "chord": {"type": "choice", "instructions": "Which chord?",
+                  "criteria": {"chord_0": {"names": "CM", "pitch_classes": [0, 4, 7]},
+                               "chord_1": {"names": "Cm", "pitch_classes": [0, 3, 7]}}},
+        "lvl": {"type": "score", "instructions": "How good?", "criteria": ["bad\nreally", "good"]}}}
+    ids, matrix = to_matrix_request(req)
+    poem, chord, lvl = matrix["questions"]
+    assert poem["options"].splitlines() == ["option_0: There once was a cat / Who sat on a mat.",
+                                            "option_1: There once was a dog / Who sat on a log."]
+    assert len(chord["options"].splitlines()) == 2 and '"pitch_classes": [0, 4, 7]' in chord["options"]
+    assert lvl["options"].splitlines() == ["0: bad / really", "1: good"]
+
+
+def test_answers_keyed_by_callers_option_names_and_integer_usage():
+    req = {"state": "x", "questions": {"q": {"type": "choice", "instructions": "?",
+                                             "criteria": {"a\nb": None, "c": None}}}}
+    ids, matrix = to_matrix_request(req)
+    result = {"results": [{"cells": [{"kind": "choice", "choice": "a / b", "confidence": 0.7,
+                                      "probabilities": {"a / b": 0.7, "c": 0.3}}]}]}  # no state_tokens recorded
+    resp = from_matrix_result(result, ids, req)
+    assert resp["answers"]["q"]["choice"] == "a\nb"
+    assert set(resp["answers"]["q"]["probabilities"]) == {"a\nb", "c"}
+    assert resp["usage"]["input_tokens"] == 0  # an integer, never null: benchmark harnesses sum it
