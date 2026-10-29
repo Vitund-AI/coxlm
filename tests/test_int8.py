@@ -117,12 +117,3 @@ def test_adapters_need_the_bf16_export(int8_pair, monkeypatch, tmp_path):
     int8, _ = int8_pair
     with pytest.raises(ValueError, match="bf16 export"):
         _load(int8, monkeypatch, adapter=str(tmp_path))
-
-
-def test_mlx_dequantizes_to_the_reference(int8_pair):
-    pytest.importorskip("mlx.core")
-    pytest.importorskip("mlx_lm")
-    int8, ref = int8_pair
-    m = coxlm.load(int8, backend="mlx", dtype="fp32")
-    r = coxlm.load(ref, backend="mlx", dtype="fp32")
-    assert _max_diff(_probs(m), _probs(r)) == 0.0

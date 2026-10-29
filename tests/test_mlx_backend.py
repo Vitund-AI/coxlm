@@ -173,3 +173,15 @@ def test_device_without_backend_picks_torch(tiny_export, monkeypatch):
     monkeypatch.setattr(coxlm, "_default_backend", lambda path, revision: "mlx")
     m = coxlm.load(tiny_export, device="cpu", dtype="fp32")
     assert not type(m).__module__.endswith("mlx_backend")
+
+
+def test_int8_build_matches_its_dequantized_reference(tiny_export, tmp_path):
+    """An int8wo export (coxlm.int8) loads on MLX dequantized to bf16: answers equal an export that holds exactly the
+    dequantized values."""
+    import coxlm
+    from tiny_export import make_int8_exports
+    int8, ref = make_int8_exports(tiny_export, str(tmp_path / "int8"), str(tmp_path / "ref"))
+    m = coxlm.load(int8, backend="mlx", dtype="fp32")
+    r = coxlm.load(ref, backend="mlx", dtype="fp32")
+    schema = _schema()
+    assert _max_diff(_probs(m, STATES, schema), _probs(r, STATES, schema)) == 0.0
