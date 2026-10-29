@@ -63,3 +63,44 @@ def make_tiny_export(folder: str, seed: int = 0) -> str:
                "capabilities": {"reads_instructions": True}, "meta": {"build": build, "features": []}},
               open(os.path.join(folder, "cox_config.json"), "w"))
     return folder
+
+
+def quantize_rows(w):
+    """int8wo quantization of a 2-D weight, as the export builder does it (torchao Int8Tensor PerRow): the weight in
+    bf16, scale = absmax / 127.5 computed in bf16, q8 = round(W / scale) clamped to int8."""
+    import torch
+
+    w = w.to(torch.bfloat16)
+    scale = (w.abs().amax(dim=1, keepdim=True) / 127.5).clamp(min=torch.finfo(torch.float32).eps).to(torch.bfloat16)
+    q8 = torch.clamp(torch.round(w.float() / scale.float()), -128, 127).to(torch.int8)
+    return q8.contiguous(), scale.contiguous()
+
+
+def make_int8_exports(src: str, int8_dir: str, ref_dir: str) -> tuple[str, str]:
+    """From an export: an int8wo export (every decoder-block Linear weight and the embedding int8) and a reference
+    export holding exactly the dequantized values (bf16) in the same places, every other tensor unchanged."""
+    import shutil
+
+    import torch
+    from safetensors.torch import load_file, save_file
+
+    w = load_file(os.path.join(src, "model.safetensors"))
+    q, ref = {}, {}
+    for k, v in w.items():
+        if v.ndim == 2 and (".layers." in k or k.endswith("embed_tokens.weight")):
+            q8, scale = quantize_rows(v)
+            q[k + ".q8"], q[k + ".scale"] = q8, scale
+            ref[k] = (q8.float() * scale.float()).to(torch.bfloat16)
+        else:
+            q[k] = ref[k] = v
+    for d, tensors in ((int8_dir, q), (ref_dir, ref)):
+        os.makedirs(d, exist_ok=True)
+        for name in os.listdir(src):
+            if name != "model.safetensors":
+                shutil.copy2(os.path.join(src, name), os.path.join(d, name))
+        save_file(tensors, os.path.join(d, "model.safetensors"), metadata={"format": "pt"})
+    cfg = json.load(open(os.path.join(src, "cox_config.json")))
+    cfg["format_version"] = 2
+    cfg["weights"] = {"format": "int8wo", "version": 1, "embed": "int8", "min_coxlm": "0.7.0"}
+    json.dump(cfg, open(os.path.join(int8_dir, "cox_config.json"), "w"))
+    return int8_dir, ref_dir

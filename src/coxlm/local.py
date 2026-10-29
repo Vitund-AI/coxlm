@@ -34,6 +34,9 @@ def load(path: str | os.PathLike, encoder: str | None = None, device: str | None
     path = resolve(path, revision=revision)
     if is_export(path):
         model = _load_export(path, source, device=device, dtype=dtype, max_length=max_length)
+        if adapter is not None and model.weights_format != "bf16":
+            raise ValueError(f"{source}: fine-tune adapters apply to the bf16 export (e.g. Vitund/cox-1-3b), not to this "
+                             f"{model.weights_format} build")
         if adapter is not None:
             from .adapter import apply_adapter
             apply_adapter(model, resolve(adapter, revision=adapter_revision), merge=merge)
@@ -90,21 +93,28 @@ def _load_export(path: str, source: str, device: str | None = None, dtype: str |
 
     from .checkpoint import META_KEY, check_supported, load_state
     from .model import build_model
+    from .packed import check_format_version, iter_unpacked_torch, packed_info
 
     cfg = json.load(open(os.path.join(path, "cox_config.json")))
-    if int(cfg.get("format_version", 0)) != 1:
-        raise ValueError(f"{path}: export format {cfg.get('format_version')!r} is newer than this coxlm; upgrade coxlm")
+    check_format_version(path, cfg)
     build = dict((cfg.get("meta") or {}).get("build") or {})
     build.update({"read_layer": None, "truncate": False})  # the folder holds exactly the read blocks
     check_supported(build)
     dev = device or _default_device()
     if not str(dev).startswith("cuda"):  # the hub causal-conv1d kernel is CUDA-only (CPU, Apple MPS)
         os.environ.setdefault("COX_HUB_CONV1D", "0")
-    from .packed import iter_unpacked_torch, packed_info
-    info = packed_info(path)  # a packed export (4-bit codebooks): build from the config, unpack to bf16 one weight
-    model = build_model(path, lora_r=0, pretrained_weights=info is None,  # at a time straight into place
+    info = packed_info(path)  # a packed / int8 export: build from the config, then fill the weights one at a time
+    model = build_model(path, lora_r=0, pretrained_weights=info is None,
                         state_norm=build.get("state_norm") or "standardize", dtype=dtype or _default_dtype(dev))
-    if info is not None:
+    int8_info = None
+    if info is not None and info.get("format") == "int8wo":
+        from .int8 import load_resident, resident_for
+        if resident_for(dev):  # int8 stays int8 (on CUDA by default): about half the backbone's GPU memory
+            int8_info = load_resident(model.encoder, path, dev, dtype=model.encoder.dtype,
+                                      kernel=os.environ.get("COXLM_INT8_KERNEL") or None)
+        else:
+            int8_info = {"resident": False}
+    if info is not None and not (int8_info or {}).get("resident"):  # codebook4, or int8 dequantized (CPU / MPS):
         own = model.encoder.state_dict()
         seen = set()
         with torch.no_grad():
@@ -136,6 +146,8 @@ def _load_export(path: str, source: str, device: str | None = None, dtype: str |
     model.encoder_name = cfg.get("base_model")
     model.checkpoint_path = source
     model.export_path = path  # what an adapter's base check fingerprints (coxlm.adapter)
+    model.weights_format = (info or {}).get("format", "bf16")
+    model.int8_info = int8_info
     return _maybe_compile(model)
 
 

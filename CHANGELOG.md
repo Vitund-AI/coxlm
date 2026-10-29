@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0 (not released yet)
+
+- `load()` reads INT8 builds (cox_config.json `"format_version": 2`, `"weights": {"format": "int8wo"}`, e.g.
+  `Vitund/cox-1-3b-int8`): int8 weights with one bf16 scale per output channel for the backbone's linear layers and
+  per row for the embedding table. On CUDA they stay int8 in GPU memory (cox-1-3b: about 2.9 GB loaded instead of
+  5.9 GB) as torchao `Int8Tensor` weights when torchao is installed (`coxlm[int8]`), or coxlm's own int8 layer with
+  the same products otherwise. On the CPU, Apple MPS and MLX they are converted to bf16 at load. `COXLM_INT8`
+  overrides where they stay int8. Adapters and fine-tuning refuse INT8 builds (use the bf16 build).
+- Older coxlm versions refuse INT8 builds with "export format 2 is newer than this coxlm; upgrade coxlm".
+
 ## 0.6.3
 
 - System One endpoint: option and level descriptions that contain line breaks (verse, addresses) or are JSON objects

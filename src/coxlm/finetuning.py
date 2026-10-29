@@ -455,6 +455,8 @@ def finetune(model, examples, questions=None, out_dir: str | os.PathLike = "cox-
                          "(e.g. coxlm.load('Vitund/cox-1-3b', backend='torch'))")
     if getattr(model, "adapter_info", None) is not None:
         raise ValueError("this model already carries an adapter; fine-tune from the base export")
+    if getattr(model, "weights_format", "bf16") != "bf16":
+        raise ValueError(f"fine-tune the bf16 export (e.g. Vitund/cox-1-3b), not a {model.weights_format} build")
     base_identity(model)  # fingerprint the base now (and fail early on a non-export)
     dev = model.device
     out_dir = os.fspath(out_dir)

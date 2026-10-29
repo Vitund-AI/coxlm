@@ -58,8 +58,8 @@ def load(path: str | os.PathLike, max_length: int = 2048, revision: str | None =
         raise ValueError(f"{source}: the MLX backend loads model exports (a folder with cox_config.json, e.g. "
                          "Vitund/cox-1-3b); use the PyTorch backend for other checkpoints")
     cfg = json.load(open(os.path.join(path, "cox_config.json")))
-    if int(cfg.get("format_version", 0)) != 1:
-        raise ValueError(f"{path}: export format {cfg.get('format_version')!r} is newer than this coxlm; upgrade coxlm")
+    from .packed import check_format_version
+    check_format_version(path, cfg)
     build = dict((cfg.get("meta") or {}).get("build") or {})
     build.update({"read_layer": None, "truncate": False})  # the folder holds exactly the read blocks
     check_supported(build)
@@ -107,7 +107,7 @@ def _load_backbone(path: str, final_norm: str | None, dtype: str = "bf16", quant
     model = TextModel(TextModelArgs.from_dict(config))
     from .packed import packed_info, unpack_mlx
     info = packed_info(path)
-    if info is not None:  # a packed export (4-bit codebooks): unpacked to bf16 here, computed in bf16 as usual
+    if info is not None:  # a packed export (4-bit codebooks) or int8wo: unpacked to bf16 here, computed in bf16 as usual
         weights: dict[str, Any] = unpack_mlx(path, info)
     else:
         files = [os.path.join(path, f) for f in sorted(os.listdir(path)) if f.startswith("model") and f.endswith(".safetensors")]

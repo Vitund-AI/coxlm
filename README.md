@@ -37,6 +37,15 @@ questions in a few tens of milliseconds. Without a GPU it still works on the CPU
 have an NVIDIA GPU, your PyTorch build has no CUDA support: install a CUDA build from
 [pytorch.org](https://pytorch.org/get-started/locally/).
 
+INT8 builds (an export whose cox_config.json says `"weights": {"format": "int8wo"}`, such as
+`Vitund/cox-1-3b-int8`) load the same way. On a CUDA GPU their weights stay int8 in GPU memory: the model takes
+about 2.9 GB instead of 5.9 GB once loaded, so cox-1-3b fits an 8 GB GPU with room for long texts, with the same
+skill as the bf16 build within measurement noise. Each matrix product widens the int8 weights to bf16, so it is not
+faster than bf16. On the CPU, Apple MPS and MLX the int8 weights are converted to bf16 as the model loads (same
+answers, no memory saving). Installing `torchao` (`coxlm[int8]`) makes the weights torchao tensors; without it a
+built-in layer computes the same products. Fine-tuning and adapters need the bf16 build. coxlm 0.6 and older stop
+with "upgrade coxlm" on an INT8 build.
+
 On Linux (and WSL2), install the `fast` extra (`coxlm[local,fast]`) for the fast linear-attention kernels. On native Windows the kernels usually don't load (Triton, which
 they need, has no official Windows build), so coxlm falls back to slower PyTorch code with the same answers; for
 full speed on Windows, use WSL2. The very first answer after installing takes longer (about 25 s on an RTX 4080
@@ -359,6 +368,12 @@ The server has no authentication. Run it on a trusted network.
 - `COXLM_COMPILE=1` compiles each backbone block with `torch.compile`: about 19%
   faster on long texts, no change on short ones, and roughly 100 s of compiling
   over the first requests. Useful for long-running servers.
+- `COXLM_INT8=auto|resident|dequant` (INT8 builds): `auto` (default) keeps the weights int8 on CUDA and converts
+  them to bf16 elsewhere; `resident` keeps them int8 on any device, `dequant` converts them on any device.
+  `COXLM_INT8_KERNEL=torchao|builtin` picks how int8 products are computed (default: torchao when installed).
+- `COXLM_FORK_TOKENS` (default 16384): how many option-line tokens one forked pass reads. Each forked row carries
+  the backbone's linear-attention state (about 30 MB per row for cox-1-3b), so on an 8 GB GPU a question with many
+  options needs a smaller budget (1024 worked on an RTX 3070).
 - `COXLM_KEEP_CACHE_GB` (default 4): the server gives cached GPU memory back to
   the system when more than this much is unused, for example after a very long text.
 

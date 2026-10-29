@@ -54,6 +54,9 @@ mlx = [
     "safetensors",
     "huggingface_hub",
 ]
+# INT8 builds (Vitund/cox-1-3b-int8) on CUDA as torchao int8 tensors; optional: without it coxlm's own int8 layer
+# computes the same products
+int8 = ["torchao>=0.18"]
 test = ["pytest"]
 
 [project.urls]

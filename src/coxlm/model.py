@@ -141,8 +141,8 @@ class AmortizedDecisionModel(nn.Module, PromptLayout):
         self.readout_mode = mode
         self.pointer_q = self.pointer_k = None
         if mode == "pointer":
-            d = self.encoder.get_input_embeddings().weight.shape[1]
-            dev = self.encoder.get_input_embeddings().weight.device
+            emb = self.encoder.get_input_embeddings()  # an int8 table (coxlm.int8) has no cheap .weight
+            d, dev = emb.embedding_dim, next(iter(emb.state_dict().values())).device
             self.pointer_q, self.pointer_k = nn.Linear(d, dp).to(dev), nn.Linear(d, dp).to(dev)
             self._pointer_scale = dp ** -0.5
         self._cache.clear()
