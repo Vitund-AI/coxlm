@@ -373,7 +373,8 @@ The server has no authentication. Run it on a trusted network.
   `COXLM_INT8_KERNEL=torchao|builtin` picks how int8 products are computed (default: torchao when installed).
 - `COXLM_FORK_TOKENS` (default 16384): how many option-line tokens one forked pass reads. Each forked row carries
   the backbone's linear-attention state (about 30 MB per row for cox-1-3b), so on an 8 GB GPU a question with many
-  options needs a smaller budget (1024 worked on an RTX 3070).
+  options needs a smaller budget: with the INT8 build on an RTX 3070 (texts up to 1.5k tokens, questions with up to
+  100 options, two texts per call), 1024 still ran out of memory and 256 peaked at 4.7 GB.
 - `COXLM_KEEP_CACHE_GB` (default 4): the server gives cached GPU memory back to
   the system when more than this much is unused, for example after a very long text.
 
