@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 (not released yet)
+## 0.7.0
 
 - `load()` reads INT8 builds (cox_config.json `"format_version": 2`, `"weights": {"format": "int8wo"}`, e.g.
   `Vitund/cox-1-3b-int8`): int8 weights with one bf16 scale per output channel for the backbone's linear layers and
